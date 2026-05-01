@@ -34,21 +34,40 @@ heartbeats), and matches the existing in-process gRPC code paths.
 
 A single setting `panel_mode` in the `settings` table:
 
-| Mode         | Web UI         | Local Xray | Outbound gRPC | Inbound gRPC server |
-|--------------|----------------|------------|---------------|---------------------|
-| `standalone` | full           | yes        | none          | no                  |
-| `master`     | full + Nodes   | optional*  | per-node      | no                  |
-| `node`       | locked, status | yes        | none          | yes (mTLS, port N)  |
+| Mode         | Web UI         | Local Xray | Nodes section | Pushes to remote nodes | Accepts master commands |
+|--------------|----------------|------------|---------------|------------------------|-------------------------|
+| `standalone` | full           | yes        | hidden        | no                     | no                      |
+| `master`     | full + Nodes   | yes (self-node) | visible | yes                    | no                      |
+| `node`       | locked, status | yes (driven by master) | hidden | no              | yes (mTLS gRPC, port N) |
 
-*Master "optional Xray" — a master can also act as a node-of-itself
-(call this `self-node`), so a single-server setup can later grow a
-master + remote nodes without rebuilding the address pool. v1 ships
-without self-node; nodes must be separate machines. (See §10.)
+**Key design decision (v1):** `master` mode also runs Xray locally — the
+master IS itself a node from the data-plane perspective. This means a
+single-server cluster works: install panel, switch to `master`, all
+inbounds run locally, Nodes section is empty. Later, add a remote `node`
+server to scale out — old inbounds keep running on master, new inbounds
+can be assigned to either master or the new node.
 
-Mode is changed via UI from `standalone` only after the operator confirms
-("are you sure"). Going `master → standalone` requires zero remote nodes.
-Going `node → standalone` wipes the master-pinned Xray config and
-restores the local DB inbounds (which were frozen during node mode).
+Functionally `standalone` and `master` are very similar; the only
+difference is whether the **Nodes** management UI is shown and whether
+the panel maintains the gRPC client pool to remote nodes. We keep them
+as distinct modes to give first-time users the simpler 3x-ui experience
+by default.
+
+Internally each panel has a synthetic `Node` row representing
+"this machine" (id=1, name=`local`, address=auto-detected). Inbounds
+created in `standalone` get `node_id=1`. Switching to `master` reuses
+the same row; remote nodes get id=2, 3, … This way the
+Inbound→Node link is always defined and `standalone↔master` mode
+switching needs no data migration.
+
+Mode transitions:
+- `standalone ↔ master`: free, just toggles the Nodes UI and gRPC client
+  pool startup. No data changes.
+- `* → node`: requires zero remote nodes assigned and (for master)
+  zero non-local inbounds. Wipes node identity, re-bootstraps for pairing.
+- `node → standalone`: requires explicit "unpair" first (DB password
+  re-entry). Then panel keeps the master-pushed config as local DB
+  inbounds and behaves like standalone going forward.
 
 ## 4. Data model changes
 
@@ -71,22 +90,20 @@ New tables (additive, all migrations go through `database.initModels`):
 | xray_version   | string  | reported by node                                   |
 | created_at     | int64   |                                                    |
 
-### `node_inbounds` (master)
-Many-to-many link between `inbounds` and `nodes`. v1 we keep it simple:
-each `Inbound` has an optional `node_id` column directly on
-`inbounds` (nullable; null means "this master, local Xray" if self-node
-is enabled, otherwise an error in master mode).
-
-For v2 we promote to a real M:N table so that one logical inbound can
-fan out across many nodes with the same UUIDs (Marzban's default UX).
-
 ### `node_identity` (node only)
 Singleton row holding the node's own keypair, the master's pinned cert,
 and the bootstrap token used during pairing.
 
 ### `inbounds` — new column
-`node_id INTEGER NULL` with a foreign key to `nodes(id)`. `gorm:"index"`.
-Default `NULL`. Existing rows untouched on upgrade.
+`node_id INTEGER NOT NULL DEFAULT 1`, foreign key to `nodes(id)`,
+indexed. On upgrade from upstream 3x-ui: migration creates the synthetic
+`local` node (id=1) first, then runs ALTER TABLE adding the column with
+default 1. Existing inbounds therefore all get `node_id=1` and
+behaviourally nothing changes.
+
+For v2 we promote to a real M:N table (`node_inbounds`) so that one
+logical inbound can fan out across many nodes with the same UUIDs
+(Marzban's default UX).
 
 ## 5. Control-plane protocol (`mesh.proto`)
 
@@ -157,23 +174,26 @@ main.go                    # MODIFIED: dispatch based on panel_mode
 ## 7. Behaviour matrix at boot
 
 ```
+ensure synthetic node row id=1 (`local`) exists; create on first boot
 read panel_mode from DB (default: standalone)
 
 if standalone:
-  start xray locally (as today)
-  serve full panel UI
+  start xray locally driven by inbounds where node_id=1
+  serve full panel UI; hide Nodes section
 
 if master:
-  do NOT start local xray (v1)
-  serve panel UI with Nodes section
-  for each connected node, open gRPC client, push current config
-  start heartbeat goroutine
+  start xray locally driven by inbounds where node_id=1  (master IS a node)
+  serve full panel UI; show Nodes section
+  for each remote node row (id>=2):
+    open gRPC client, ApplyConfig with that node's inbound subset
+    start heartbeat goroutine
 
 if node:
   start gRPC server on api_port (mTLS)
-  start xray locally, but driven by master-pushed config only
+  start xray locally — but config comes from last ApplyConfig from master,
+    not from local DB
   panel UI: status-only, "managed by master <name>" screen
-  reject login attempts? — no, allow login but UI is locked
+  allow login (you may need to unpair) but lock all CRUD endpoints
 ```
 
 ## 8. Subscription rendering changes
@@ -216,13 +236,10 @@ node-side Xray runs the same config we'd run locally.
 
 ## 10. Open questions / deferred to v2
 
-- **Self-node** (master also runs Xray as one of its nodes): adds
-  complexity to mode handling, deferred. v1: master is purely control
-  plane.
 - **Same-UUID-across-nodes** (Marzban default): in v1 each inbound
   lives on exactly one node. To replicate, user duplicates the inbound
-  with the same UUIDs/clients on another node. v2 promotes the
-  `node_inbounds` table to first-class M:N.
+  with the same UUIDs/clients on another node. v2 promotes inbounds
+  to a true M:N relation with `node_inbounds` table.
 - **Stat aggregation**: v1 master pulls stats per-node and stores
   per-(client,node). UI shows summed totals. Sub link shows summed
   traffic per client.
