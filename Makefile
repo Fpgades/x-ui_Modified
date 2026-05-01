@@ -13,10 +13,18 @@ BUILD_FLAGS ?= -trimpath -ldflags="-s -w"
 
 all: build
 
-build:
+# Build depends on the generated proto stubs. If they're missing or
+# stale relative to the .proto, `make proto` is invoked first.
+build: mesh/pb/mesh.pb.go
 	@mkdir -p $(BIN_DIR)
 	CGO_ENABLED=1 $(GO) build $(BUILD_FLAGS) -o $(BIN_DIR)/$(BIN_NAME) main.go
 	@ls -lh $(BIN_DIR)/$(BIN_NAME)
+
+# This rule is the proto-generated dispatcher: make sees this file
+# missing, asks for it, the rule runs `make proto` which writes
+# mesh/pb/mesh.pb.go (and mesh.grpc.pb.go).
+mesh/pb/mesh.pb.go: mesh/proto/mesh.proto
+	$(MAKE) proto
 
 # Regenerate gRPC stubs from mesh/proto/mesh.proto. Generated files
 # live under mesh/pb and ARE committed (so end users / nodes don't need
