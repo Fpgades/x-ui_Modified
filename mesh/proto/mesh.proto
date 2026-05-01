@@ -1,0 +1,185 @@
+syntax = "proto3";
+
+package mesh.v1;
+
+option go_package = "github.com/mhsanaei/3x-ui/v2/mesh/pb;pb";
+
+// Mesh is the master <-> node control protocol.
+//
+// Transport: gRPC over TCP, mTLS in steady state. The single exception
+// is `Pair` which runs over plain TLS bootstrapped from a one-shot
+// pairing token; subsequent calls require client cert authentication.
+//
+// Master is always the gRPC client; the node is always the server.
+// This means master can sit behind NAT (typical: a panel behind
+// Cloudflare) and nodes are the public-facing data plane.
+service Mesh {
+  // Pair establishes mutual trust between a master and a fresh node.
+  // Called exactly once per node, immediately after the operator
+  // creates the node row on the master and pastes the bootstrap token
+  // shown by the node.
+  //
+  // Authentication: the node's TLS cert is validated by the master
+  // against the SHA-256 fingerprint embedded in the bootstrap token.
+  // This is the only time the master accepts a self-signed leaf
+  // without a pinned CA. After Pair returns, both sides pin certs
+  // and all subsequent calls require mTLS.
+  rpc Pair(PairRequest) returns (PairResponse);
+
+  // ApplyConfig pushes a complete xray-core config to the node. The
+  // node MUST atomically swap and reload — partial application is not
+  // allowed. Idempotent: same config_hash → no-op.
+  rpc ApplyConfig(ApplyConfigRequest) returns (ApplyConfigResponse);
+
+  // AddClient / RemoveClient mirror xray HandlerService for fast,
+  // single-client mutations that don't require an xray reload.
+  // Used by master when an inbound is not changing structurally —
+  // just gaining/losing a user. Falls back to ApplyConfig on failure.
+  rpc AddClient(ClientOp) returns (OpResult);
+  rpc RemoveClient(ClientOp) returns (OpResult);
+
+  // GetStats mirrors xray StatsService. Master polls periodically and
+  // aggregates per-(client, node) counters into the local DB.
+  rpc GetStats(StatsRequest) returns (StatsResponse);
+
+  // Heartbeat: bidirectional liveness + drift detection. Master sends
+  // its current desired-config hash; node sends its applied hash and
+  // local xray status. If hashes diverge for >N pings, master
+  // re-sends ApplyConfig.
+  rpc Heartbeat(stream HeartbeatPing) returns (stream HeartbeatPong);
+
+  // StreamLogs: tail xray + panel logs to the master operator. Used
+  // for the Nodes UI debug pane. Closing the stream terminates the
+  // tail.
+  rpc StreamLogs(LogRequest) returns (stream LogChunk);
+}
+
+// ---------- Pair ----------
+
+message PairRequest {
+  // Plaintext bootstrap token shown to the operator on the node UI.
+  // Single-use, ~10min TTL, ~32 random bytes base64-encoded. The node
+  // verifies by constant-time compare against the value in its
+  // node_identities row.
+  string token = 1;
+
+  // PEM-encoded master CA certificate. Pinned by the node; used to
+  // validate the master's mTLS client cert on every subsequent call.
+  bytes master_ca_pem = 2;
+
+  // PEM-encoded master client CSR. The node signs it with its own CA
+  // and returns the cert in PairResponse.
+  bytes master_client_csr_pem = 3;
+
+  // Human-readable master display name, used in the node's status UI.
+  string master_name = 4;
+}
+
+message PairResponse {
+  // PEM-encoded node CA cert. Pinned by master; used to validate the
+  // node's gRPC server cert on every subsequent call.
+  bytes node_ca_pem = 1;
+
+  // Master's client cert, signed by node CA, returned to master.
+  bytes signed_master_client_cert_pem = 2;
+
+  // Node-reported metadata.
+  string node_name = 3;
+  string node_version = 4;
+  string xray_version = 5;
+}
+
+// ---------- ApplyConfig ----------
+
+message ApplyConfigRequest {
+  // SHA-256 hex of config_json. Lets the node early-out if the config
+  // is identical to what's already running.
+  string config_hash = 1;
+
+  // Full xray-core config JSON. Same shape that 3x-ui already writes
+  // to /usr/local/x-ui/bin/config.json — we ship that exact bytes
+  // through the wire so the node-side translator is trivial.
+  bytes config_json = 2;
+}
+
+message ApplyConfigResponse {
+  bool applied = 1;            // true if the node restarted xray with the new config
+  bool already_current = 2;    // true if config_hash matched the running one (no-op)
+  string xray_version = 3;
+  string error = 4;
+}
+
+// ---------- ClientOp ----------
+
+message ClientOp {
+  string inbound_tag = 1;
+  string protocol = 2;         // matches model.Protocol values
+
+  // Protocol-specific user blob. Mirrors what xray HandlerService's
+  // AddUser/RemoveUser expects. JSON-encoded for transport simplicity;
+  // master constructs this from model.Client + flow info before send.
+  bytes user_json = 3;
+}
+
+message OpResult {
+  bool ok = 1;
+  string error = 2;
+}
+
+// ---------- Stats ----------
+
+message StatsRequest {
+  // If true, atomically read-and-zero the counters. Master uses true
+  // for periodic delta polling.
+  bool reset = 1;
+
+  // xray stats name pattern (e.g. "user>>>foo@bar>>>traffic>>>uplink").
+  // Empty means "all".
+  string pattern = 2;
+}
+
+message StatRow {
+  string name = 1;
+  int64 value = 2;
+}
+
+message StatsResponse {
+  repeated StatRow rows = 1;
+}
+
+// ---------- Heartbeat ----------
+
+message HeartbeatPing {
+  int64 ts_unix_ms = 1;
+  string applied_config_hash = 2;
+  string xray_status = 3;       // "running" | "stopped" | "errored"
+  double load_avg_1m = 4;
+  uint64 mem_used_bytes = 5;
+  uint64 mem_total_bytes = 6;
+}
+
+message HeartbeatPong {
+  int64 ts_unix_ms = 1;
+
+  // Master's view of the desired config hash. If this differs from
+  // the node's last applied hash for too long, node should expect an
+  // imminent ApplyConfig call.
+  string desired_config_hash = 2;
+
+  // Soft signal: master telling node it should/shouldn't have xray
+  // running. v1: always true while the node row exists on master.
+  bool xray_should_be_running = 3;
+}
+
+// ---------- Logs ----------
+
+message LogRequest {
+  string source = 1;            // "xray" | "panel" | "access"
+  bool follow = 2;              // tail -f if true
+  int32 tail_lines = 3;         // initial backlog, 0 = none
+}
+
+message LogChunk {
+  bytes data = 1;               // raw bytes, may contain partial lines
+  int64 ts_unix_ms = 2;
+}
