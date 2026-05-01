@@ -106,6 +106,13 @@ var defaultValueMap = map[string]string{
 	"ldapDefaultTotalGB":    "0",
 	"ldapDefaultExpiryDays": "0",
 	"ldapDefaultLimitIP":    "0",
+
+	// Mesh: panel runtime mode. See docs/MESH_DESIGN.md §3.
+	// Values: "standalone" (default, behaves as upstream 3x-ui),
+	// "master" (additionally manages remote nodes), "node" (locked,
+	// driven by a remote master via gRPC).
+	"panelMode":       "standalone",
+	"meshNodeApiPort": "62050",
 }
 
 // SettingService provides business logic for application settings management.
@@ -276,6 +283,50 @@ func (s *SettingService) setInt(key string, value int) error {
 
 func (s *SettingService) GetXrayConfigTemplate() (string, error) {
 	return s.getString("xrayTemplateConfig")
+}
+
+// PanelMode values. Keep in sync with defaultValueMap["panelMode"].
+const (
+	PanelModeStandalone = "standalone"
+	PanelModeMaster     = "master"
+	PanelModeNode       = "node"
+)
+
+// GetPanelMode returns the current panel runtime mode. Falls back to
+// "standalone" for fresh installs and on any read error (defensive:
+// boot path must not abort because of a missing setting row).
+func (s *SettingService) GetPanelMode() string {
+	v, err := s.getString("panelMode")
+	if err != nil || v == "" {
+		return PanelModeStandalone
+	}
+	switch v {
+	case PanelModeStandalone, PanelModeMaster, PanelModeNode:
+		return v
+	default:
+		logger.Warningf("invalid panelMode %q in DB, falling back to standalone", v)
+		return PanelModeStandalone
+	}
+}
+
+// SetPanelMode validates and persists the panel mode. The caller is
+// responsible for orchestrating any runtime transition (stopping/
+// starting xray, opening/closing gRPC server, refreshing UI gates) —
+// this function only writes the setting row.
+func (s *SettingService) SetPanelMode(mode string) error {
+	switch mode {
+	case PanelModeStandalone, PanelModeMaster, PanelModeNode:
+		return s.setString("panelMode", mode)
+	default:
+		return common.NewErrorf("invalid panelMode %q", mode)
+	}
+}
+
+// GetMeshNodeApiPort returns the TCP port the node-mode gRPC server
+// listens on (and that master-mode reaches when calling out to remote
+// nodes that haven't overridden it). Default 62050.
+func (s *SettingService) GetMeshNodeApiPort() (int, error) {
+	return s.getInt("meshNodeApiPort")
 }
 
 func (s *SettingService) GetXrayOutboundTestUrl() (string, error) {

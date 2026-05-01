@@ -66,6 +66,12 @@ type Inbound struct {
 	StreamSettings string   `json:"streamSettings" form:"streamSettings"`
 	Tag            string   `json:"tag" form:"tag" gorm:"unique"`
 	Sniffing       string   `json:"sniffing" form:"sniffing"`
+
+	// Mesh: which node runs this inbound. NodeId=1 is the synthetic
+	// "local" node — i.e. the panel host itself. Default is 1 so
+	// upstream-3x-ui DBs migrate seamlessly: ALTER TABLE ADD COLUMN with
+	// a default puts every existing inbound on the local node.
+	NodeId int `json:"nodeId" form:"nodeId" gorm:"default:1;index"`
 }
 
 // OutboundTraffics tracks traffic statistics for Xray outbound connections.
@@ -127,6 +133,88 @@ type CustomGeoResource struct {
 	LastModified  string `json:"lastModified" gorm:"column:last_modified"`
 	CreatedAt     int64  `json:"createdAt" gorm:"autoCreateTime;column:created_at"`
 	UpdatedAt     int64  `json:"updatedAt" gorm:"autoUpdateTime;column:updated_at"`
+}
+
+// NodeStatus represents the connection state of a remote mesh node.
+type NodeStatus string
+
+const (
+	// NodeStatusPending means the node row exists but no successful Pair has happened yet.
+	NodeStatusPending NodeStatus = "pending"
+	// NodeStatusConnected means the master has a healthy gRPC channel to this node.
+	NodeStatusConnected NodeStatus = "connected"
+	// NodeStatusDisconnected means the master previously paired with this node but cannot currently reach it.
+	NodeStatusDisconnected NodeStatus = "disconnected"
+	// NodeStatusError means the most recent ApplyConfig or Heartbeat failed in a non-network way.
+	NodeStatusError NodeStatus = "error"
+	// NodeStatusLocal is reserved for the synthetic id=1 row that always represents the panel host itself.
+	NodeStatusLocal NodeStatus = "local"
+)
+
+// Node represents a host that runs xray-core under master control.
+//
+// id=1 is reserved: every install has a synthetic "local" Node row
+// representing the panel host itself. Standalone-mode and master-mode
+// panels both use this row for their own machine. Remote nodes paired
+// from master mode get id>=2.
+//
+// Fields prefixed Api* describe the master->node control plane (gRPC).
+// Address (no prefix) is what end-user clients connect to and what the
+// subscription URL embeds — typically a public hostname. ApiAddress can
+// be the same, or a separate private address when control traffic
+// should ride a VPN/WireGuard tunnel.
+type Node struct {
+	Id        int        `json:"id" gorm:"primaryKey;autoIncrement"`
+	Name      string     `json:"name" gorm:"unique;not null"`
+	Address   string     `json:"address"` // public host that clients reach via subscription
+	Port      int        `json:"port"`    // optional: override port for sub link generation; usually unused
+	Status    NodeStatus `json:"status" gorm:"default:pending"`
+	IsLocal   bool       `json:"isLocal" gorm:"default:false"`
+	CreatedAt int64      `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt int64      `json:"updatedAt" gorm:"autoUpdateTime"`
+
+	// Control plane (only meaningful when IsLocal=false).
+	ApiAddress string `json:"apiAddress"`
+	ApiPort    int    `json:"apiPort"`
+
+	// mTLS material. CaCertPem is the node's CA cert that the master
+	// pinned on Pair; ClientCertPem/ClientKeyPem are the master's mTLS
+	// client cert+key issued by that node CA. Stored on the master
+	// side. v1: plaintext in SQLite; v2: encrypted with a panel-derived
+	// key.
+	CaCertPem     string `json:"-"`
+	ClientCertPem string `json:"-"`
+	ClientKeyPem  string `json:"-"`
+
+	// Last-seen telemetry, updated by heartbeat.
+	LastSeen     int64  `json:"lastSeen" gorm:"default:0"`
+	Version      string `json:"version"`
+	XrayVersion  string `json:"xrayVersion"`
+	LastError    string `json:"lastError"`
+	AppliedHash  string `json:"appliedHash"` // sha256 of last successful ApplyConfig payload
+}
+
+// NodeIdentity is a singleton (id=1 only) holding the keys/secrets a
+// node needs to be paired with a master. Created on first switch into
+// `node` mode; replaced on unpair. Lives only in node-mode panels;
+// master/standalone panels have an empty table.
+type NodeIdentity struct {
+	Id              int    `gorm:"primaryKey;autoIncrement;check:id = 1"`
+	NodeName        string `json:"nodeName"`
+	CaCertPem       string `json:"-"` // this node's own CA, served to master during Pair
+	CaKeyPem        string `json:"-"`
+	ServerCertPem   string `json:"-"` // node's gRPC server cert (signed by own CA)
+	ServerKeyPem    string `json:"-"`
+	BootstrapToken  string `json:"-"` // one-shot pairing token, cleared after Pair
+	BootstrapExpiry int64  `json:"bootstrapExpiry"`
+
+	// Set after Pair succeeds.
+	MasterClientFingerprint string `json:"masterClientFingerprint"` // sha256 of master's pinned client cert
+	MasterName              string `json:"masterName"`
+	MasterPairedAt          int64  `json:"masterPairedAt"`
+
+	CreatedAt int64 `json:"createdAt" gorm:"autoCreateTime"`
+	UpdatedAt int64 `json:"updatedAt" gorm:"autoUpdateTime"`
 }
 
 // Client represents a client configuration for Xray inbounds with traffic limits and settings.

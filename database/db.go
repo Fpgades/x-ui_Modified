@@ -39,6 +39,11 @@ func initModels() error {
 		&xray.ClientTraffic{},
 		&model.HistoryOfSeeders{},
 		&model.CustomGeoResource{},
+		// Mesh tables. AutoMigrate is additive — on existing 3x-ui DBs
+		// these tables get created empty; ensureLocalNode() then plants
+		// the synthetic id=1 row.
+		&model.Node{},
+		&model.NodeIdentity{},
 	}
 	for _, model := range models {
 		if err := db.AutoMigrate(model); err != nil {
@@ -47,6 +52,27 @@ func initModels() error {
 		}
 	}
 	return nil
+}
+
+// ensureLocalNode plants the synthetic id=1 "local" Node row on every
+// install. Required so that Inbound.NodeId default value (1) always
+// resolves to a real row, regardless of panel mode. Idempotent.
+func ensureLocalNode() error {
+	var count int64
+	if err := db.Model(&model.Node{}).Where("id = ?", 1).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	local := &model.Node{
+		Id:      1,
+		Name:    "local",
+		Address: "",
+		Status:  model.NodeStatusLocal,
+		IsLocal: true,
+	}
+	return db.Create(local).Error
 }
 
 // initUser creates a default admin user if the users table is empty.
@@ -145,6 +171,10 @@ func InitDB(dbPath string) error {
 	}
 
 	if err := initModels(); err != nil {
+		return err
+	}
+
+	if err := ensureLocalNode(); err != nil {
 		return err
 	}
 
