@@ -927,9 +927,12 @@ func (s *SubService) genRemark(inbound *model.Inbound, email string, extra strin
 	// suffixing the node name. Always emit a suffix when the link is
 	// fanned out — even for the local node — so v2rayng/etc. show
 	// distinct entries instead of grouping identical-named ones.
+	// The remarkModel's separation char goes between segments, so we
+	// just append the bare node name; result is e.g. 'email-Finland'
+	// rather than 'email-@Finland'.
 	if s.currentNodeOverride > 0 {
 		if nodeName := s.lookupNodeName(s.currentNodeOverride); nodeName != "" {
-			remark = append(remark, "@"+nodeName)
+			remark = append(remark, nodeName)
 		}
 	}
 
