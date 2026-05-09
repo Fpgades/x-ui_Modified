@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 	"embed"
+	"fmt"
 	"html/template"
 	"io"
 	"io/fs"
@@ -27,6 +28,7 @@ import (
 	"github.com/mhsanaei/3x-ui/v2/web/network"
 	"github.com/mhsanaei/3x-ui/v2/web/service"
 	"github.com/mhsanaei/3x-ui/v2/web/websocket"
+	"github.com/mhsanaei/3x-ui/v2/xray"
 
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/sessions"
@@ -405,6 +407,14 @@ func (s *Server) Start() (err error) {
 			s.Stop()
 		}
 	}()
+
+	// Ensure xray-core is on disk before anything tries to launch it.
+	// On a fresh install this downloads ~25 MB from GitHub releases
+	// (one-time, ~30s on a decent line). Failure is fatal — without
+	// xray-core the panel can't serve traffic.
+	if err = xray.EnsureBinary(); err != nil {
+		return fmt.Errorf("xray-core bootstrap: %w", err)
+	}
 
 	loc, err := s.settingService.GetTimeLocation()
 	if err != nil {
