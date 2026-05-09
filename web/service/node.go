@@ -99,6 +99,44 @@ func (s *NodeService) CreateRemoteNode(name, address string, port int, apiAddres
 	return n, nil
 }
 
+// UpdateNode patches the editable fields on a Node row. For the local
+// node only name is meaningful; for remote nodes the operator may also
+// retarget address/port/apiAddress/apiPort (e.g. when the node moves
+// to a new IP).
+//
+// Empty strings/zero ints in the patch mean "leave unchanged", except
+// for name which must always be present and non-empty.
+func (s *NodeService) UpdateNode(id int, name, address string, port int, apiAddress string, apiPort int) (*model.Node, error) {
+	if strings.TrimSpace(name) == "" {
+		return nil, errors.New("node name cannot be empty")
+	}
+	n, err := s.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	updates := map[string]any{
+		"name": name,
+	}
+	if !n.IsLocal {
+		if address != "" {
+			updates["address"] = address
+		}
+		if port > 0 {
+			updates["port"] = port
+		}
+		if apiAddress != "" {
+			updates["api_address"] = apiAddress
+		}
+		if apiPort > 0 {
+			updates["api_port"] = apiPort
+		}
+	}
+	if err := database.GetDB().Model(&model.Node{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	return s.Get(id)
+}
+
 // Delete removes a remote node row. Refuses to delete the synthetic
 // local node. Caller is responsible for first reassigning any inbounds
 // that reference this node — we enforce a hard error here as a safety

@@ -140,6 +140,8 @@
         nodes: [],
         addModalVisible: false,
         addForm: { name: '', address: '', apiAddress: '', apiPort: 62050 },
+        editModalVisible: false,
+        editForm: { id: 0, name: '', address: '', apiAddress: '', apiPort: 62050, isLocal: false },
         pairModalVisible: false,
         pairTarget: null,
         pairToken: '',
@@ -560,6 +562,38 @@
         } finally {
           this.mesh.pairBusy = false;
         }
+      },
+
+      meshOpenEdit(node) {
+        this.mesh.editForm = {
+          id: node.id,
+          name: node.name || '',
+          address: node.address || '',
+          apiAddress: node.apiAddress || '',
+          apiPort: node.apiPort || 62050,
+          isLocal: !!node.isLocal,
+        };
+        this.mesh.editModalVisible = true;
+      },
+      async meshSaveEdit() {
+        const f = this.mesh.editForm;
+        if (!f.name) {
+          this.$message.error('name is required');
+          return;
+        }
+        const payload = { name: f.name };
+        if (!f.isLocal) {
+          payload.address = f.address || '';
+          payload.apiAddress = f.apiAddress || '';
+          payload.apiPort = f.apiPort || 62050;
+        }
+        const r = await HttpUtil.post('/panel/api/mesh/nodes/' + f.id, payload);
+        if (!r || !r.success) {
+          this.$message.error((r && r.msg) || 'save failed');
+          return;
+        }
+        this.mesh.editModalVisible = false;
+        await this.meshLoad();
       },
 
       async meshDeleteNode(id) {

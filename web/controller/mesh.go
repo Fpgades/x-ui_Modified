@@ -37,6 +37,7 @@ func (a *MeshController) initRouter(g *gin.RouterGroup) {
 	// Master-side: node CRUD + pairing.
 	g.GET("/nodes", a.listNodes)
 	g.POST("/nodes", a.createNode)
+	g.POST("/nodes/:id", a.updateNode)
 	g.POST("/nodes/:id/pair", a.pairNode)
 	g.POST("/nodes/:id/del", a.deleteNode)
 	g.POST("/nodes/:id/resync", a.resyncNode)
@@ -193,6 +194,29 @@ func (a *MeshController) pairNode(c *gin.Context) {
 		return
 	}
 	jsonMsg(c, "paired", nil)
+}
+
+// updateNode patches editable fields on a node row — name (always),
+// plus connection target fields for remote nodes. Available in any
+// panel mode for the local node so the operator can rename it (the
+// name shows in subscription link remarks).
+func (a *MeshController) updateNode(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, "update node", err)
+		return
+	}
+	var req createNodeRequest // reuse the same shape — name + connection fields
+	if err := c.ShouldBind(&req); err != nil {
+		jsonMsg(c, "update node", err)
+		return
+	}
+	n, err := a.nodeService.UpdateNode(id, req.Name, req.Address, req.Port, req.ApiAddress, req.ApiPort)
+	if err != nil {
+		jsonMsg(c, "update node", err)
+		return
+	}
+	jsonObj(c, n, nil)
 }
 
 // resyncNode triggers an immediate ApplyConfig to the given node,

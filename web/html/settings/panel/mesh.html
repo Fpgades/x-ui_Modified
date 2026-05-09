@@ -114,23 +114,25 @@
           <a-tag v-else color="default">[[ record.status ]]</a-tag>
         </template>
         <template slot="actions" slot-scope="text, record">
-          <a-space v-if="!record.isLocal" size="small">
-            <a-button
-              size="small"
-              type="primary"
-              v-if="record.status !== 'connected'"
-              @click="meshOpenPair(record)"
-            >Pair</a-button>
-            <a-button
-              size="small"
-              v-if="record.status === 'connected'"
-              @click="meshResyncNode(record.id)"
-            >Resync</a-button>
-            <a-popconfirm title="Delete this node?" @confirm="meshDeleteNode(record.id)">
-              <a-button size="small" type="danger">Delete</a-button>
-            </a-popconfirm>
+          <a-space size="small">
+            <a-button size="small" @click="meshOpenEdit(record)">Edit</a-button>
+            <template v-if="!record.isLocal">
+              <a-button
+                size="small"
+                type="primary"
+                v-if="record.status !== 'connected'"
+                @click="meshOpenPair(record)"
+              >Pair</a-button>
+              <a-button
+                size="small"
+                v-if="record.status === 'connected'"
+                @click="meshResyncNode(record.id)"
+              >Resync</a-button>
+              <a-popconfirm title="Delete this node?" @confirm="meshDeleteNode(record.id)">
+                <a-button size="small" type="danger">Delete</a-button>
+              </a-popconfirm>
+            </template>
           </a-space>
-          <a-tag v-else color="default">—</a-tag>
         </template>
       </a-table>
     </a-list-item>
@@ -154,8 +156,8 @@
   cancelText="Cancel"
 >
   <a-form-model layout="vertical">
-    <a-form-model-item label="Name (unique, for your reference)">
-      <a-input v-model="mesh.addForm.name" placeholder="e.g. de-fra-1"></a-input>
+    <a-form-model-item label="Name (shown in client subscription, supports emoji 🇩🇪 🇺🇸 etc.)">
+      <a-input v-model="mesh.addForm.name" placeholder="e.g. de-fra-1 🇩🇪"></a-input>
     </a-form-model-item>
     <a-form-model-item label="Public address (used in subscription links)">
       <a-input v-model="mesh.addForm.address" placeholder="e.g. node1.example.com"></a-input>
@@ -166,6 +168,33 @@
     <a-form-model-item label="API port (gRPC)">
       <a-input-number v-model="mesh.addForm.apiPort" :min="1" :max="65535"></a-input-number>
     </a-form-model-item>
+  </a-form-model>
+</a-modal>
+
+<!-- ============== Edit Node modal ============== -->
+<a-modal
+  :title="'Edit node ' + (mesh.editForm && mesh.editForm.name)"
+  :visible="mesh.editModalVisible"
+  @ok="meshSaveEdit"
+  @cancel="mesh.editModalVisible = false"
+  okText="Save"
+  cancelText="Cancel"
+>
+  <a-form-model layout="vertical">
+    <a-form-model-item label="Name (shown in client subscription — emoji like 🇩🇪 🇺🇸 supported)">
+      <a-input v-model="mesh.editForm.name" placeholder="e.g. master 🇺🇦 / de-fra-1 🇩🇪"></a-input>
+    </a-form-model-item>
+    <template v-if="mesh.editForm && !mesh.editForm.isLocal">
+      <a-form-model-item label="Public address (subscription URL host)">
+        <a-input v-model="mesh.editForm.address"></a-input>
+      </a-form-model-item>
+      <a-form-model-item label="API address (master → node control plane)">
+        <a-input v-model="mesh.editForm.apiAddress"></a-input>
+      </a-form-model-item>
+      <a-form-model-item label="API port">
+        <a-input-number v-model="mesh.editForm.apiPort" :min="1" :max="65535"></a-input-number>
+      </a-form-model-item>
+    </template>
   </a-form-model>
 </a-modal>
 
