@@ -51,9 +51,12 @@ func NewMeshSyncService(xs *XrayService, ns *NodeService, ss SettingService) *Me
 // usually ignores the return; the per-node error is observable via
 // node.last_error and the upcoming heartbeat status.
 func (s *MeshSyncService) PushAll(ctx context.Context) error {
-	if s.settingService.GetPanelMode() != PanelModeMaster {
+	mode := s.settingService.GetPanelMode()
+	if mode != PanelModeMaster {
+		logger.Infof("mesh sync: PushAll skipped, mode=%s (need master)", mode)
 		return nil
 	}
+	logger.Infof("mesh sync: PushAll tick begin")
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -117,8 +120,15 @@ func (s *MeshSyncService) pushOneOpts(ctx context.Context, n *model.Node, force 
 	}
 	hash := client.HashConfig(payload)
 
-	logger.Debugf("mesh sync: node %d (%s): cfg has %d inbounds, hash=%s, last=%s, force=%v",
-		n.Id, n.Name, len(cfg.InboundConfigs), hash[:12], n.AppliedHash, force)
+	prevHash := "(none)"
+	if n.AppliedHash != "" {
+		prevHash = n.AppliedHash
+		if len(prevHash) > 12 {
+			prevHash = prevHash[:12]
+		}
+	}
+	logger.Infof("mesh sync: node %d (%s): cfg has %d inbounds, hash=%s, prev=%s, force=%v",
+		n.Id, n.Name, len(cfg.InboundConfigs), hash[:12], prevHash, force)
 
 	if !force && hash == n.AppliedHash {
 		return nil
