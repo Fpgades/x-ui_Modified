@@ -31,12 +31,12 @@ type SubService struct {
 	inboundService service.InboundService
 	settingService service.SettingService
 
-	// Mesh: cache of node_id -> public address, populated on first
-	// resolveInboundAddress hit per request lifecycle. SubService is
-	// created per request (NewSubService in subController), so the
-	// cache lives just long enough to avoid repeating the DB lookup
-	// for inbounds that share the same node.
+	// Mesh: caches of node_id -> public address / name, populated on
+	// first lookup per request lifecycle. SubService is created per
+	// request (NewSubService in subController), so the caches live
+	// just long enough to avoid one DB hit per inbound link.
 	nodeAddrCache map[int]string
+	nodeNameCache map[int]string
 
 	// currentNodeOverride is set transiently by the multi-node fan-out
 	// in GetSubs: for each (inbound, node) pair we want resolveInboundAddress
@@ -554,20 +554,40 @@ func (s *SubService) resolveInboundAddress(inbound *model.Inbound) string {
 // subscription URLs. Cached map populated lazily on first miss to
 // avoid one DB hit per inbound on every subscription render.
 func (s *SubService) lookupNodeAddress(nodeId int) (string, bool) {
+	if addr, _, ok := s.lookupNode(nodeId); ok {
+		return addr, true
+	}
+	return "", false
+}
+
+// lookupNodeName returns the Node row's human-readable name. Used by
+// genRemark to suffix subscription link names with the node label.
+func (s *SubService) lookupNodeName(nodeId int) string {
+	_, name, _ := s.lookupNode(nodeId)
+	return name
+}
+
+// lookupNode is the shared cache-aware fetch. Returns (address, name, ok).
+func (s *SubService) lookupNode(nodeId int) (string, string, bool) {
 	if s.nodeAddrCache == nil {
 		s.nodeAddrCache = map[int]string{}
 	}
+	if s.nodeNameCache == nil {
+		s.nodeNameCache = map[int]string{}
+	}
 	if addr, ok := s.nodeAddrCache[nodeId]; ok {
-		return addr, ok
+		return addr, s.nodeNameCache[nodeId], addr != ""
 	}
 	db := database.GetDB()
 	var n model.Node
-	if err := db.Select("address").First(&n, nodeId).Error; err != nil {
+	if err := db.Select("address", "name").First(&n, nodeId).Error; err != nil {
 		s.nodeAddrCache[nodeId] = ""
-		return "", false
+		s.nodeNameCache[nodeId] = ""
+		return "", "", false
 	}
 	s.nodeAddrCache[nodeId] = n.Address
-	return n.Address, true
+	s.nodeNameCache[nodeId] = n.Name
+	return n.Address, n.Name, true
 }
 
 func findClientIndex(clients []model.Client, email string) int {
@@ -900,6 +920,16 @@ func (s *SubService) genRemark(inbound *model.Inbound, email string, extra strin
 		order, exists := orders[char]
 		if exists && order != "" {
 			remark = append(remark, order)
+		}
+	}
+
+	// Mesh: distinguish per-node copies of the same logical inbound by
+	// suffixing the node name. Always emit a suffix when the link is
+	// fanned out — even for the local node — so v2rayng/etc. show
+	// distinct entries instead of grouping identical-named ones.
+	if s.currentNodeOverride > 0 {
+		if nodeName := s.lookupNodeName(s.currentNodeOverride); nodeName != "" {
+			remark = append(remark, "@"+nodeName)
 		}
 	}
 
