@@ -15,9 +15,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
-	"time"
 
-	"github.com/mhsanaei/3x-ui/v2/database"
 	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/logger"
 	"github.com/mhsanaei/3x-ui/v2/mesh"
@@ -82,7 +80,7 @@ func (s *Server) Start() error {
 		return errors.New("mesh server already started")
 	}
 
-	id, err := loadOrCreateIdentity()
+	id, err := mesh.EnsureIdentity()
 	if err != nil {
 		return fmt.Errorf("identity: %w", err)
 	}
@@ -138,7 +136,7 @@ func (s *Server) Stop() {
 //  3. Pin the master CA
 //  4. Burn the token (clear from DB)
 func (s *Server) Pair(ctx context.Context, req *pb.PairRequest) (*pb.PairResponse, error) {
-	id, err := loadIdentityForPair()
+	id, err := mesh.LoadIdentity()
 	if err != nil {
 		return nil, status.Error(codes.FailedPrecondition, "node identity not initialised")
 	}
@@ -170,7 +168,7 @@ func (s *Server) Pair(ctx context.Context, req *pb.PairRequest) (*pb.PairRespons
 	}
 
 	masterFingerprint := pki.FingerprintSHA256(req.GetMasterCaPem())
-	if err := finalizePair(masterFingerprint, req.GetMasterName()); err != nil {
+	if err := mesh.FinalizePair(masterFingerprint, req.GetMasterName()); err != nil {
 		return nil, status.Errorf(codes.Internal, "persist pairing: %v", err)
 	}
 
@@ -247,7 +245,7 @@ func (s *Server) requireMasterAuth(ctx context.Context) error {
 		return status.Error(codes.Unauthenticated, "no client cert presented")
 	}
 
-	id, err := loadIdentityForPair()
+	id, err := mesh.LoadIdentity()
 	if err != nil || id.MasterClientFingerprint == "" {
 		return status.Error(codes.FailedPrecondition, "node not paired")
 	}
@@ -263,74 +261,6 @@ func (s *Server) requireMasterAuth(ctx context.Context) error {
 	}
 	_ = x509.NewCertPool() // kept to make explicit that chain verification ran via tls.Config (see buildTLSConfig)
 	return nil
-}
-
-// ----- helpers (DB-backed identity) -----
-//
-// These helpers thin-wrap GORM operations on model.NodeIdentity. We
-// keep them in this package (rather than web/service) because the
-// node-mode bootstrap path runs before the full service container is
-// initialised.
-
-func loadOrCreateIdentity() (*model.NodeIdentity, error) {
-	db := database.GetDB()
-	var id model.NodeIdentity
-	err := db.First(&id, 1).Error
-	if err == nil {
-		return &id, nil
-	}
-	if !database.IsNotFound(err) {
-		return nil, err
-	}
-
-	hostname, _ := net.LookupAddr("127.0.0.1")
-	name := "node"
-	if len(hostname) > 0 {
-		name = hostname[0]
-	}
-
-	ca, err := pki.GenerateCA("xui-mesh-node-" + name)
-	if err != nil {
-		return nil, err
-	}
-	srv, err := pki.GenerateServerCert(ca, name, []string{name, "localhost"}, []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")})
-	if err != nil {
-		return nil, err
-	}
-
-	id = model.NodeIdentity{
-		Id:            1,
-		NodeName:      name,
-		CaCertPem:     string(ca.CertPEM),
-		CaKeyPem:      string(ca.KeyPEM),
-		ServerCertPem: string(srv.CertPEM),
-		ServerKeyPem:  string(srv.KeyPEM),
-	}
-	if err := db.Create(&id).Error; err != nil {
-		return nil, err
-	}
-	return &id, nil
-}
-
-func loadIdentityForPair() (*model.NodeIdentity, error) {
-	db := database.GetDB()
-	var id model.NodeIdentity
-	if err := db.First(&id, 1).Error; err != nil {
-		return nil, err
-	}
-	return &id, nil
-}
-
-func finalizePair(masterFingerprint, masterName string) error {
-	db := database.GetDB()
-	now := time.Now().UnixMilli()
-	return db.Model(&model.NodeIdentity{}).Where("id = ?", 1).Updates(map[string]any{
-		"master_client_fingerprint": masterFingerprint,
-		"master_name":               masterName,
-		"master_paired_at":          now,
-		"bootstrap_token":           "", // burn it
-		"bootstrap_expiry":          0,
-	}).Error
 }
 
 func buildTLSConfig(id *model.NodeIdentity) (*tls.Config, error) {

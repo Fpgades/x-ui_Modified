@@ -113,6 +113,15 @@ var defaultValueMap = map[string]string{
 	// driven by a remote master via gRPC).
 	"panelMode":       "standalone",
 	"meshNodeApiPort": "62050",
+
+	// Master CA / identity. Generated lazily on first Pair; stored as
+	// settings rather than in a dedicated table — there's exactly one
+	// master CA per install, so a singleton key is the right shape.
+	// Default empty means "not yet generated"; NodeService.ensureMasterCA
+	// distinguishes empty from a populated value.
+	"meshMasterCaCertPem": "",
+	"meshMasterCaKeyPem":  "",
+	"meshMasterName":      "",
 }
 
 // SettingService provides business logic for application settings management.
