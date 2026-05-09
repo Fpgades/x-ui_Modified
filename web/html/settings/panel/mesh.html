@@ -1,0 +1,185 @@
+{{define "settings/panel/mesh"}}
+<a-collapse default-active-key="1">
+
+  <!-- ============== Mode selector (always visible) ============== -->
+  <a-collapse-panel key="1" header="Cluster mode">
+    <a-setting-list-item paddings="small">
+      <template #title>Panel mode</template>
+      <template #description>
+        <code>standalone</code>: regular 3x-ui (single host).
+        <code>master</code>: this host runs xray AND manages remote nodes.
+        <code>node</code>: this host is driven by a remote master.
+      </template>
+      <template #control>
+        <a-select v-model="mesh.modeDraft" style="min-width: 180px">
+          <a-select-option value="standalone">standalone</a-select-option>
+          <a-select-option value="master">master</a-select-option>
+          <a-select-option value="node">node</a-select-option>
+        </a-select>
+      </template>
+    </a-setting-list-item>
+    <a-list-item>
+      <a-space direction="horizontal" :style="{ padding: '0 20px' }">
+        <a-tag color="blue">current: [[ mesh.mode ]]</a-tag>
+        <a-button type="primary" :disabled="mesh.modeDraft === mesh.mode" @click="meshSaveMode">
+          Apply (will restart panel)
+        </a-button>
+        <a-button @click="meshLoad">Refresh</a-button>
+      </a-space>
+    </a-list-item>
+  </a-collapse-panel>
+
+  <!-- ============== Node mode: own identity ============== -->
+  <a-collapse-panel key="2" v-if="mesh.mode === 'node'" header="This node's identity">
+    <a-setting-list-item paddings="small">
+      <template #title>Node name</template>
+      <template #control><code>[[ mesh.identity.nodeName ]]</code></template>
+    </a-setting-list-item>
+    <a-setting-list-item paddings="small">
+      <template #title>Pairing status</template>
+      <template #control>
+        <a-tag v-if="mesh.identity.isPaired" color="green">paired with [[ mesh.identity.masterName ]]</a-tag>
+        <a-tag v-else color="orange">not paired</a-tag>
+      </template>
+    </a-setting-list-item>
+    <a-setting-list-item paddings="small" v-if="!mesh.identity.isPaired">
+      <template #title>Bootstrap token</template>
+      <template #description>
+        Paste this token on the master panel's "Add Node" form. Single-use,
+        expires in ~10 minutes. Mint a fresh one if it expires.
+      </template>
+      <template #control>
+        <a-space direction="vertical" style="width: 100%">
+          <a-input
+            v-if="mesh.identity.bootstrapTokenValid"
+            :value="mesh.identity.bootstrapToken"
+            readonly
+            @click="$event.target.select()"
+            style="font-family: monospace"
+          />
+          <a-tag v-else-if="mesh.identity.bootstrapToken" color="red">
+            token expired
+          </a-tag>
+          <a-tag v-else color="default">no token yet</a-tag>
+          <a-button type="primary" size="small" @click="meshMintToken">Mint new token</a-button>
+        </a-space>
+      </template>
+    </a-setting-list-item>
+    <a-setting-list-item paddings="small" v-if="mesh.identity.isPaired">
+      <template #title>Unpair</template>
+      <template #description>
+        Removes the pinned master credentials. Required before switching
+        out of node mode. The master will lose control after this.
+      </template>
+      <template #control>
+        <a-popconfirm
+          title="Are you sure? You'll lose connection from the master."
+          @confirm="meshUnpair"
+        >
+          <a-button type="danger">Unpair</a-button>
+        </a-popconfirm>
+      </template>
+    </a-setting-list-item>
+  </a-collapse-panel>
+
+  <!-- ============== Master mode: remote nodes ============== -->
+  <a-collapse-panel key="3" v-if="mesh.mode === 'master'" header="Remote nodes">
+    <a-list-item>
+      <a-table
+        :columns="[
+          { title: 'ID', dataIndex: 'id', width: 50 },
+          { title: 'Name', dataIndex: 'name' },
+          { title: 'Address (clients)', dataIndex: 'address' },
+          { title: 'API endpoint', key: 'api', scopedSlots: { customRender: 'api' } },
+          { title: 'Status', dataIndex: 'status', scopedSlots: { customRender: 'status' } },
+          { title: 'Xray', dataIndex: 'xrayVersion' },
+          { title: 'Actions', key: 'actions', scopedSlots: { customRender: 'actions' } }
+        ]"
+        :data-source="mesh.nodes"
+        :pagination="false"
+        rowKey="id"
+        size="small"
+      >
+        <template slot="api" slot-scope="text, record">
+          <code>[[ record.apiAddress ]]:[[ record.apiPort ]]</code>
+        </template>
+        <template slot="status" slot-scope="text, record">
+          <a-tag v-if="record.status === 'connected'" color="green">connected</a-tag>
+          <a-tag v-else-if="record.status === 'pending'"  color="orange">pending</a-tag>
+          <a-tag v-else-if="record.status === 'error'"     color="red">error</a-tag>
+          <a-tag v-else-if="record.status === 'local'"     color="blue">local</a-tag>
+          <a-tag v-else color="default">[[ record.status ]]</a-tag>
+        </template>
+        <template slot="actions" slot-scope="text, record">
+          <a-space v-if="!record.isLocal" size="small">
+            <a-button
+              size="small"
+              type="primary"
+              v-if="record.status !== 'connected'"
+              @click="meshOpenPair(record)"
+            >Pair</a-button>
+            <a-popconfirm title="Delete this node?" @confirm="meshDeleteNode(record.id)">
+              <a-button size="small" type="danger">Delete</a-button>
+            </a-popconfirm>
+          </a-space>
+          <a-tag v-else color="default">—</a-tag>
+        </template>
+      </a-table>
+    </a-list-item>
+    <a-list-item>
+      <a-space direction="horizontal" :style="{ padding: '0 20px' }">
+        <a-button type="primary" @click="mesh.addModalVisible = true">+ Add node</a-button>
+        <a-button @click="meshLoad">Refresh</a-button>
+      </a-space>
+    </a-list-item>
+  </a-collapse-panel>
+
+</a-collapse>
+
+<!-- ============== Add Node modal ============== -->
+<a-modal
+  title="Add remote node"
+  :visible="mesh.addModalVisible"
+  @ok="meshCreateNode"
+  @cancel="mesh.addModalVisible = false"
+  okText="Create"
+  cancelText="Cancel"
+>
+  <a-form-model layout="vertical">
+    <a-form-model-item label="Name (unique, for your reference)">
+      <a-input v-model="mesh.addForm.name" placeholder="e.g. de-fra-1" />
+    </a-form-model-item>
+    <a-form-model-item label="Public address (used in subscription links)">
+      <a-input v-model="mesh.addForm.address" placeholder="e.g. node1.example.com" />
+    </a-form-model-item>
+    <a-form-model-item label="API address (control plane host, often same as above)">
+      <a-input v-model="mesh.addForm.apiAddress" placeholder="leave empty to copy address" />
+    </a-form-model-item>
+    <a-form-model-item label="API port (gRPC)">
+      <a-input-number v-model="mesh.addForm.apiPort" :min="1" :max="65535" />
+    </a-form-model-item>
+  </a-form-model>
+</a-modal>
+
+<!-- ============== Pair modal ============== -->
+<a-modal
+  :title="'Pair with node ' + (mesh.pairTarget && mesh.pairTarget.name)"
+  :visible="mesh.pairModalVisible"
+  @ok="meshDoPair"
+  @cancel="mesh.pairModalVisible = false"
+  okText="Pair"
+  cancelText="Cancel"
+  :confirm-loading="mesh.pairBusy"
+>
+  <p>
+    Open the node panel, switch it into <code>node</code> mode, then mint a
+    bootstrap token on the node's "This node's identity" section. Paste the
+    token below.
+  </p>
+  <a-input
+    v-model="mesh.pairToken"
+    placeholder="XUIMESH1.xxxxxxxxxxxx.xxxxx..."
+    style="font-family: monospace"
+  />
+</a-modal>
+{{end}}

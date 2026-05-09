@@ -104,10 +104,12 @@ func (a *MeshController) validateModeTransition(current, target string) error {
 		return errBadMode(target)
 	}
 
-	// Leaving node mode requires unpair first.
+	// Leaving node mode requires unpair first — but only if there's
+	// actually a pinned master. If the operator switched to node mode
+	// for a moment without pairing, let them switch right back.
 	if current == service.PanelModeNode && target != service.PanelModeNode {
 		id, err := mesh.LoadIdentity()
-		if err == nil && id.MasterClientFingerprint != "" {
+		if err == nil && id != nil && id.MasterClientFingerprint != "" {
 			return errStr("unpair from master before leaving node mode")
 		}
 	}

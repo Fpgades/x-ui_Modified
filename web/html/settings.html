@@ -86,6 +86,13 @@
                     </template>
                     {{ template "settings/panel/subscription/json" . }}
                   </a-tab-pane>
+                  <a-tab-pane key="6" :style="{ paddingTop: '20px' }">
+                    <template #tab>
+                      <a-icon type="cluster"></a-icon>
+                      <span>Mesh / Cluster</span>
+                    </template>
+                    {{ template "settings/panel/mesh" . }}
+                  </a-tab-pane>
                 </a-tabs>
               </a-col>
             </a-row>
@@ -117,6 +124,27 @@
       oldAllSetting: new AllSetting(),
       allSetting: new AllSetting(),
       saveBtnDisable: true,
+      // ----- Mesh / cluster -----
+      mesh: {
+        mode: 'standalone',
+        modeDraft: 'standalone',
+        identity: {
+          nodeName: '',
+          bootstrapToken: '',
+          bootstrapTokenValid: false,
+          bootstrapExpiryUnixMs: 0,
+          masterName: '',
+          masterPairedAtUnixMs: 0,
+          isPaired: false
+        },
+        nodes: [],
+        addModalVisible: false,
+        addForm: { name: '', address: '', apiAddress: '', apiPort: 62050 },
+        pairModalVisible: false,
+        pairTarget: null,
+        pairToken: '',
+        pairBusy: false
+      },
       entryHost: null,
       entryPort: null,
       entryProtocol: null,
@@ -412,6 +440,136 @@
         updatedNoises[index] = { ...updatedNoises[index], applyTo: value };
         this.noisesArray = updatedNoises;
       },
+
+      // ----- Mesh / cluster -----
+      async meshLoad() {
+        try {
+          const m = await HttpUtil.get('/panel/api/mesh/mode');
+          if (m && m.success && m.obj) {
+            this.mesh.mode = m.obj.mode;
+            this.mesh.modeDraft = m.obj.mode;
+          }
+        } catch (e) { console.warn('mesh mode load failed', e); }
+
+        if (this.mesh.mode === 'master') {
+          try {
+            const r = await HttpUtil.get('/panel/api/mesh/nodes');
+            if (r && r.success) this.mesh.nodes = r.obj || [];
+          } catch (e) { console.warn('mesh nodes load failed', e); }
+        }
+
+        if (this.mesh.mode === 'node') {
+          try {
+            const r = await HttpUtil.get('/panel/api/mesh/identity');
+            if (r && r.success && r.obj) {
+              this.mesh.identity = Object.assign(this.mesh.identity, r.obj);
+            }
+          } catch (e) { console.warn('mesh identity load failed', e); }
+        }
+      },
+
+      async meshSaveMode() {
+        const target = this.mesh.modeDraft;
+        const ok = await new Promise(res => {
+          this.$confirm({
+            title: 'Switch panel mode to "' + target + '"?',
+            content: 'The panel will need a restart for this to take effect. xray-core may briefly stop.',
+            okText: 'Switch',
+            cancelText: 'Cancel',
+            onOk: () => res(true),
+            onCancel: () => res(false)
+          });
+        });
+        if (!ok) return;
+
+        const r = await HttpUtil.post('/panel/api/mesh/mode', { mode: target });
+        if (!r || !r.success) {
+          this.$message.error((r && r.msg) || 'failed to switch mode');
+          return;
+        }
+        this.mesh.mode = target;
+        this.$message.success('Mode set to ' + target + '. Restart the panel from the sidebar to apply.');
+        await this.meshLoad();
+      },
+
+      async meshMintToken() {
+        const r = await HttpUtil.post('/panel/api/mesh/identity/token');
+        if (!r || !r.success) {
+          this.$message.error((r && r.msg) || 'mint failed');
+          return;
+        }
+        await this.meshLoad();
+      },
+
+      async meshUnpair() {
+        const r = await HttpUtil.post('/panel/api/mesh/identity/unpair');
+        if (!r || !r.success) {
+          this.$message.error((r && r.msg) || 'unpair failed');
+          return;
+        }
+        this.$message.success('unpaired');
+        await this.meshLoad();
+      },
+
+      async meshCreateNode() {
+        const f = this.mesh.addForm;
+        if (!f.name || !f.address) {
+          this.$message.error('name and address are required');
+          return;
+        }
+        const r = await HttpUtil.post('/panel/api/mesh/nodes', {
+          name: f.name,
+          address: f.address,
+          apiAddress: f.apiAddress || f.address,
+          apiPort: f.apiPort || 62050
+        });
+        if (!r || !r.success) {
+          this.$message.error((r && r.msg) || 'create failed');
+          return;
+        }
+        this.mesh.addModalVisible = false;
+        this.mesh.addForm = { name: '', address: '', apiAddress: '', apiPort: 62050 };
+        await this.meshLoad();
+      },
+
+      meshOpenPair(node) {
+        this.mesh.pairTarget = node;
+        this.mesh.pairToken = '';
+        this.mesh.pairModalVisible = true;
+      },
+
+      async meshDoPair() {
+        if (!this.mesh.pairTarget) return;
+        if (!this.mesh.pairToken) {
+          this.$message.error('paste the bootstrap token first');
+          return;
+        }
+        this.mesh.pairBusy = true;
+        try {
+          const r = await HttpUtil.post(
+            '/panel/api/mesh/nodes/' + this.mesh.pairTarget.id + '/pair',
+            { token: this.mesh.pairToken }
+          );
+          if (!r || !r.success) {
+            this.$message.error((r && r.msg) || 'pair failed');
+            return;
+          }
+          this.$message.success('paired with ' + this.mesh.pairTarget.name);
+          this.mesh.pairModalVisible = false;
+          await this.meshLoad();
+        } finally {
+          this.mesh.pairBusy = false;
+        }
+      },
+
+      async meshDeleteNode(id) {
+        const r = await HttpUtil.post('/panel/api/mesh/nodes/' + id + '/del');
+        if (!r || !r.success) {
+          this.$message.error((r && r.msg) || 'delete failed');
+          return;
+        }
+        await this.meshLoad();
+      },
     },
     computed: {
       ldapInboundTagList: {
@@ -602,6 +760,7 @@
       this.entryIsIP = this._isIp(this.entryHost);
       await this.getAllSetting();
       await this.loadInboundTags();
+      await this.meshLoad();
       while (true) {
         await PromiseUtil.sleep(1000);
         this.saveBtnDisable = this.oldAllSetting.equals(this.allSetting);
