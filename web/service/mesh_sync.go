@@ -80,9 +80,9 @@ func (s *MeshSyncService) PushAll(ctx context.Context) error {
 	return lastErr
 }
 
-// PushNode regenerates and pushes only the named node's config. Used
-// from the controller when the operator clicks "Force resync" on the
-// Nodes UI (route added in a follow-up).
+// PushNode regenerates and pushes only the named node's config.
+// Bypasses the hash-dedup check — used for the operator-facing
+// "Force Resync" flow.
 func (s *MeshSyncService) PushNode(ctx context.Context, nodeId int) error {
 	n, err := s.nodeService.Get(nodeId)
 	if err != nil {
@@ -94,10 +94,17 @@ func (s *MeshSyncService) PushNode(ctx context.Context, nodeId int) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.pushOne(ctx, n)
+	return s.pushOneOpts(ctx, n, true)
 }
 
 func (s *MeshSyncService) pushOne(ctx context.Context, n *model.Node) error {
+	return s.pushOneOpts(ctx, n, false)
+}
+
+// pushOneOpts is the underlying push, optionally bypassing the
+// hash-dedup short-circuit. Used by the operator-facing Force Resync
+// flow when something on the node has gone weird.
+func (s *MeshSyncService) pushOneOpts(ctx context.Context, n *model.Node, force bool) error {
 	cfg, err := s.xrayService.GetXrayConfigForNode(n.Id)
 	if err != nil {
 		s.nodeService.markError(n.Id, err)
@@ -110,10 +117,10 @@ func (s *MeshSyncService) pushOne(ctx context.Context, n *model.Node) error {
 	}
 	hash := client.HashConfig(payload)
 
-	// Avoid the ApplyConfig round-trip if we know the node already has
-	// this exact payload. The node-side server also short-circuits on
-	// matching hash, so this is just bandwidth optimisation.
-	if hash == n.AppliedHash {
+	logger.Debugf("mesh sync: node %d (%s): cfg has %d inbounds, hash=%s, last=%s, force=%v",
+		n.Id, n.Name, len(cfg.InboundConfigs), hash[:12], n.AppliedHash, force)
+
+	if !force && hash == n.AppliedHash {
 		return nil
 	}
 

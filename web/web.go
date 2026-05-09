@@ -280,7 +280,7 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 
 	s.index = controller.NewIndexController(g)
 	s.panel = controller.NewXUIController(g)
-	s.api = controller.NewAPIController(g, s.customGeoService)
+	s.api = controller.NewAPIController(g, s.customGeoService, s.meshSyncService)
 
 	// Initialize WebSocket hub
 	s.wsHub = websocket.NewHub()

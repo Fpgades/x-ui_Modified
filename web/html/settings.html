@@ -570,6 +570,17 @@
         }
         await this.meshLoad();
       },
+
+      async meshResyncNode(id) {
+        const r = await HttpUtil.post('/panel/api/mesh/nodes/' + id + '/resync');
+        if (!r || !r.success) {
+          this.$message.error((r && r.msg) || 'resync failed');
+          return;
+        }
+        this.$message.success('resync queued');
+        // give the backend a moment to process, then reload to see fresh status
+        setTimeout(() => this.meshLoad(), 1500);
+      },
     },
     computed: {
       ldapInboundTagList: {

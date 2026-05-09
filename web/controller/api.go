@@ -15,12 +15,13 @@ type APIController struct {
 	inboundController *InboundController
 	serverController  *ServerController
 	meshController    *MeshController
+	meshSync          *service.MeshSyncService
 	Tgbot             service.Tgbot
 }
 
 // NewAPIController creates a new APIController instance and initializes its routes.
-func NewAPIController(g *gin.RouterGroup, customGeo *service.CustomGeoService) *APIController {
-	a := &APIController{}
+func NewAPIController(g *gin.RouterGroup, customGeo *service.CustomGeoService, sync *service.MeshSyncService) *APIController {
+	a := &APIController{meshSync: sync}
 	a.initRouter(g, customGeo)
 	return a
 }
@@ -53,7 +54,7 @@ func (a *APIController) initRouter(g *gin.RouterGroup, customGeo *service.Custom
 
 	// Mesh (master/node management) API
 	mesh := api.Group("/mesh")
-	a.meshController = NewMeshController(mesh)
+	a.meshController = NewMeshController(mesh, a.meshSync)
 
 	// Extra routes
 	api.GET("/backuptotgbot", a.BackuptoTgbot)

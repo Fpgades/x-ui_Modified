@@ -121,6 +121,11 @@
               v-if="record.status !== 'connected'"
               @click="meshOpenPair(record)"
             >Pair</a-button>
+            <a-button
+              size="small"
+              v-if="record.status === 'connected'"
+              @click="meshResyncNode(record.id)"
+            >Resync</a-button>
             <a-popconfirm title="Delete this node?" @confirm="meshDeleteNode(record.id)">
               <a-button size="small" type="danger">Delete</a-button>
             </a-popconfirm>

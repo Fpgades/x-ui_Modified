@@ -18,12 +18,13 @@ import (
 type MeshController struct {
 	nodeService    service.NodeService
 	settingService service.SettingService
+	syncService    *service.MeshSyncService
 }
 
 // NewMeshController returns a fully initialised controller and
 // registers its routes on g.
-func NewMeshController(g *gin.RouterGroup) *MeshController {
-	a := &MeshController{}
+func NewMeshController(g *gin.RouterGroup, sync *service.MeshSyncService) *MeshController {
+	a := &MeshController{syncService: sync}
 	a.initRouter(g)
 	return a
 }
@@ -38,6 +39,7 @@ func (a *MeshController) initRouter(g *gin.RouterGroup) {
 	g.POST("/nodes", a.createNode)
 	g.POST("/nodes/:id/pair", a.pairNode)
 	g.POST("/nodes/:id/del", a.deleteNode)
+	g.POST("/nodes/:id/resync", a.resyncNode)
 
 	// Node-side: own identity + bootstrap-token mint + unpair.
 	g.GET("/identity", a.getIdentity)
@@ -191,6 +193,30 @@ func (a *MeshController) pairNode(c *gin.Context) {
 		return
 	}
 	jsonMsg(c, "paired", nil)
+}
+
+// resyncNode triggers an immediate ApplyConfig to the given node,
+// bypassing the hash-dedup short-circuit. Useful when the operator
+// believes the node is out of sync.
+func (a *MeshController) resyncNode(c *gin.Context) {
+	if a.settingService.GetPanelMode() != service.PanelModeMaster {
+		jsonMsg(c, "resync", errStr("only available in master mode"))
+		return
+	}
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		jsonMsg(c, "resync", err)
+		return
+	}
+	if a.syncService == nil {
+		jsonMsg(c, "resync", errStr("sync service not initialised"))
+		return
+	}
+	if err := a.syncService.PushNode(c.Request.Context(), id); err != nil {
+		jsonMsg(c, "resync", err)
+		return
+	}
+	jsonMsg(c, "resync queued", nil)
 }
 
 func (a *MeshController) deleteNode(c *gin.Context) {
