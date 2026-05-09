@@ -93,6 +93,20 @@ func RemoveIndex(s []any, index int) []any {
 
 // GetXrayConfig retrieves and builds the Xray configuration from settings and inbounds.
 func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
+	// Local xray on the master/standalone host runs only inbounds
+	// assigned to the synthetic node_id=1 row. Remote inbounds live on
+	// their respective nodes and are pushed there via mesh ApplyConfig.
+	return s.buildXrayConfig(1)
+}
+
+// GetXrayConfigForNode builds an xray config containing only the
+// inbounds bound to the given node id. Used by mesh sync to produce
+// the bytes sent to a remote node.
+func (s *XrayService) GetXrayConfigForNode(nodeId int) (*xray.Config, error) {
+	return s.buildXrayConfig(nodeId)
+}
+
+func (s *XrayService) buildXrayConfig(nodeId int) (*xray.Config, error) {
 	templateConfig, err := s.settingService.GetXrayConfigTemplate()
 	if err != nil {
 		return nil, err
@@ -112,6 +126,9 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 	}
 	for _, inbound := range inbounds {
 		if !inbound.Enable {
+			continue
+		}
+		if inbound.NodeId != nodeId {
 			continue
 		}
 		// get settings clients

@@ -106,6 +106,8 @@ type Server struct {
 	settingService   service.SettingService
 	tgbotService     service.Tgbot
 	customGeoService *service.CustomGeoService
+	nodeService      service.NodeService
+	meshSyncService  *service.MeshSyncService
 
 	wsHub *websocket.Hub
 
@@ -311,12 +313,21 @@ func (s *Server) startTask() {
 	// Check whether xray is running every second
 	s.cron.AddJob("@every 1s", job.NewCheckXrayRunningJob())
 
-	// Check if xray needs to be restarted every 30 seconds
+	// Check if xray needs to be restarted every 30 seconds.
+	// In master mode, also propagate the change to remote nodes via
+	// ApplyConfig — the master pushes a fresh per-node config payload
+	// to every paired node. The node-side server idempotency check
+	// turns no-op pushes into cheap round-trips.
 	s.cron.AddFunc("@every 30s", func() {
-		if s.xrayService.IsNeedRestartAndSetFalse() {
-			err := s.xrayService.RestartXray(false)
-			if err != nil {
+		needRestart := s.xrayService.IsNeedRestartAndSetFalse()
+		if needRestart {
+			if err := s.xrayService.RestartXray(false); err != nil {
 				logger.Error("restart xray failed:", err)
+			}
+		}
+		if s.meshSyncService != nil {
+			if err := s.meshSyncService.PushAll(s.ctx); err != nil {
+				logger.Debug("mesh sync (best-effort):", err)
 			}
 		}
 	})
@@ -403,6 +414,7 @@ func (s *Server) Start() (err error) {
 	s.cron.Start()
 
 	s.customGeoService = service.NewCustomGeoService()
+	s.meshSyncService = service.NewMeshSyncService(&s.xrayService, &s.nodeService, s.settingService)
 
 	engine, err := s.initRouter()
 	if err != nil {
