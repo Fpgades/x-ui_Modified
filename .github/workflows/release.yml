@@ -63,15 +63,16 @@ jobs:
     permissions:
       contents: write
     strategy:
+      # Don't let one flaky niche-platform build cancel the rest.
+      fail-fast: false
       matrix:
+        # Trimmed from upstream's seven-arch matrix to just the two
+        # actually used in the wild (x86_64 servers, ARM64 SBCs and
+        # AWS Graviton). The 32-bit ARM and s390x targets were
+        # consistently flaky on Bootlin toolchain downloads.
         platform:
           - amd64
           - arm64
-          - armv7
-          - armv6
-          - 386
-          - armv5
-          - s390x
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
