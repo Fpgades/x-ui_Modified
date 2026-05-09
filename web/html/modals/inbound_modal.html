@@ -134,6 +134,11 @@
             get datepicker() {
                 return app.datepicker;
             },
+            // Mesh: pull through from the parent inbounds page Vue instance
+            // so the form's <a-select v-if="meshNodeOptions..."> resolves.
+            get meshNodeOptions() {
+                return (typeof app !== 'undefined' && app && app.meshNodeOptions) || [];
+            },
             get delayedExpireDays() {
                 return this.client && this.client.expiryTime < 0
                     ? this.client.expiryTime / -86400000
