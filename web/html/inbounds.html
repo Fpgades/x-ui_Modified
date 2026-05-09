@@ -1421,6 +1421,7 @@
           expiryTime: dbInbound.expiryTime,
           trafficReset: dbInbound.trafficReset,
           lastTrafficResetTime: dbInbound.lastTrafficResetTime,
+          nodeId: dbInbound.nodeId || 1,
 
           listen: '',
           port: RandomUtil.randomInteger(10000, 60000),
@@ -1467,6 +1468,7 @@
           expiryTime: dbInbound.expiryTime,
           trafficReset: dbInbound.trafficReset,
           lastTrafficResetTime: dbInbound.lastTrafficResetTime,
+          nodeId: dbInbound.nodeId || 1,
 
           listen: inbound.listen,
           port: inbound.port,
@@ -1492,6 +1494,7 @@
           expiryTime: dbInbound.expiryTime,
           trafficReset: dbInbound.trafficReset,
           lastTrafficResetTime: dbInbound.lastTrafficResetTime,
+          nodeId: dbInbound.nodeId || 1,
 
           listen: inbound.listen,
           port: inbound.port,
