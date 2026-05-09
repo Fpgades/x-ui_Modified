@@ -18,6 +18,7 @@ import (
 
 	"github.com/mhsanaei/3x-ui/v2/config"
 	"github.com/mhsanaei/3x-ui/v2/logger"
+	meshserver "github.com/mhsanaei/3x-ui/v2/mesh/server"
 	"github.com/mhsanaei/3x-ui/v2/util/common"
 	"github.com/mhsanaei/3x-ui/v2/web/controller"
 	"github.com/mhsanaei/3x-ui/v2/web/job"
@@ -109,6 +110,11 @@ type Server struct {
 	wsHub *websocket.Hub
 
 	cron *cron.Cron
+
+	// meshServer is non-nil only when panel_mode == "node": it serves
+	// the master<->node gRPC control plane on the configured port.
+	// In standalone/master modes it stays nil.
+	meshServer *meshserver.Server
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -450,6 +456,12 @@ func (s *Server) Start() (err error) {
 		s.httpServer.Serve(listener)
 	}()
 
+	if err := s.startMeshIfNode(); err != nil {
+		// Don't abort the whole panel if mesh fails — the operator
+		// needs the UI to fix it. Log loudly instead.
+		logger.Errorf("mesh: failed to start node-mode gRPC server: %v", err)
+	}
+
 	s.startTask()
 
 	isTgbotenabled, err := s.settingService.GetTgbotEnabled()
@@ -464,6 +476,10 @@ func (s *Server) Start() (err error) {
 // Stop gracefully shuts down the web server, stops Xray, cron jobs, and Telegram bot.
 func (s *Server) Stop() error {
 	s.cancel()
+	if s.meshServer != nil {
+		s.meshServer.Stop()
+		s.meshServer = nil
+	}
 	s.xrayService.StopXray()
 	if s.cron != nil {
 		s.cron.Stop()
@@ -484,6 +500,31 @@ func (s *Server) Stop() error {
 		err2 = s.listener.Close()
 	}
 	return common.Combine(err1, err2)
+}
+
+// startMeshIfNode brings up the node-side gRPC server when the panel
+// is configured in `node` mode. No-ops in standalone and master modes.
+//
+// Listening port is configurable via the meshNodeApiPort setting
+// (default 62050). Binds on 0.0.0.0 so the master can reach the node
+// over the public network; operators who want to restrict to a
+// private interface should put a firewall in front.
+func (s *Server) startMeshIfNode() error {
+	if s.settingService.GetPanelMode() != service.PanelModeNode {
+		return nil
+	}
+	port, err := s.settingService.GetMeshNodeApiPort()
+	if err != nil || port <= 0 {
+		port = 62050
+	}
+	applier := service.NewMeshXrayApplier(&s.xrayService)
+	srv := meshserver.New(":"+strconv.Itoa(port), applier)
+	if err := srv.Start(); err != nil {
+		return err
+	}
+	s.meshServer = srv
+	logger.Infof("mesh: node mode active, gRPC server listening on :%d", port)
+	return nil
 }
 
 // GetCtx returns the server's context for cancellation and deadline management.

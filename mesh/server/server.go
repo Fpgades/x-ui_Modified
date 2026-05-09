@@ -29,22 +29,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-// XrayApplier is the contract the server uses to drive the local
-// xray-core. The real implementation lives in package xray (which
-// already wraps xray-core's HandlerService/StatsService); we keep this
-// abstraction so tests can swap in a fake.
-type XrayApplier interface {
-	// ApplyJSON atomically swaps the running xray config to the given
-	// JSON bytes. Implementations should restart xray if the new bytes
-	// differ from what's running, and no-op if identical.
-	ApplyJSON(ctx context.Context, configJSON []byte) error
-	// CurrentVersion returns the running xray version, or "" if not
-	// running.
-	CurrentVersion() string
-	// CurrentStatus returns "running" / "stopped" / "errored".
-	CurrentStatus() string
-}
-
 // Server is the node-side gRPC server. Construct via New, start with
 // Start, stop with Stop. Methods on Server are safe for concurrent use
 // once Start returns.
@@ -52,7 +36,7 @@ type Server struct {
 	pb.UnimplementedMeshServer
 
 	listenAddr string
-	xray       XrayApplier
+	xray       mesh.XrayApplier
 
 	mu          sync.Mutex
 	grpc        *grpc.Server
@@ -62,7 +46,7 @@ type Server struct {
 
 // New returns a not-yet-started Server bound to listenAddr (e.g.
 // ":62050"). The xray applier is the bridge to the local xray-core.
-func New(listenAddr string, xray XrayApplier) *Server {
+func New(listenAddr string, xray mesh.XrayApplier) *Server {
 	return &Server{
 		listenAddr: listenAddr,
 		xray:       xray,

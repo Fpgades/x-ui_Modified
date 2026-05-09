@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"runtime"
 	"sync"
 
@@ -248,6 +249,37 @@ func (s *XrayService) RestartXray(isForce bool) error {
 	}
 
 	return nil
+}
+
+// RestartXrayWithRawConfig swaps to an externally-supplied xray config
+// (already-marshaled JSON) without going through the DB-backed
+// GetXrayConfig builder. This is the entry point for node-mode panels:
+// the master pushes the full config via gRPC ApplyConfig and the node
+// hands it here.
+//
+// Equals-based no-op skip mirrors RestartXray. Returns an error if the
+// JSON cannot be parsed into an xray.Config.
+func (s *XrayService) RestartXrayWithRawConfig(configJSON []byte) error {
+	lock.Lock()
+	defer lock.Unlock()
+	isManuallyStopped.Store(false)
+
+	cfg := &xray.Config{}
+	if err := json.Unmarshal(configJSON, cfg); err != nil {
+		return fmt.Errorf("xray config unmarshal: %w", err)
+	}
+
+	if s.IsXrayRunning() {
+		if p.GetConfig().Equals(cfg) {
+			logger.Debug("RestartXrayWithRawConfig: config unchanged, no-op")
+			return nil
+		}
+		_ = p.Stop()
+	}
+
+	p = xray.NewProcess(cfg)
+	result = ""
+	return p.Start()
 }
 
 // StopXray stops the running Xray process.
