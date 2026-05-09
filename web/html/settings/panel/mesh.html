@@ -49,20 +49,23 @@
         expires in ~10 minutes. Mint a fresh one if it expires.
       </template>
       <template #control>
-        <a-space direction="vertical" style="width: 100%">
+        <div style="min-width: 320px">
           <a-input
             v-if="mesh.identity.bootstrapTokenValid"
             :value="mesh.identity.bootstrapToken"
             readonly
             @click="$event.target.select()"
-            style="font-family: monospace"
+            style="font-family: monospace; margin-bottom: 8px"
           />
-          <a-tag v-else-if="mesh.identity.bootstrapToken" color="red">
+          <a-tag v-if="!mesh.identity.bootstrapTokenValid && mesh.identity.bootstrapToken" color="red" style="margin-bottom: 8px">
             token expired
           </a-tag>
-          <a-tag v-else color="default">no token yet</a-tag>
+          <a-tag v-if="!mesh.identity.bootstrapTokenValid && !mesh.identity.bootstrapToken" color="default" style="margin-bottom: 8px">
+            no token yet
+          </a-tag>
+          <br />
           <a-button type="primary" size="small" @click="meshMintToken">Mint new token</a-button>
-        </a-space>
+        </div>
       </template>
     </a-setting-list-item>
     <a-setting-list-item paddings="small" v-if="mesh.identity.isPaired">
