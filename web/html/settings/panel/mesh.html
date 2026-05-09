@@ -56,14 +56,14 @@
             readonly
             @click="$event.target.select()"
             style="font-family: monospace; margin-bottom: 8px"
-          />
+          ></a-input>
           <a-tag v-if="!mesh.identity.bootstrapTokenValid && mesh.identity.bootstrapToken" color="red" style="margin-bottom: 8px">
             token expired
           </a-tag>
           <a-tag v-if="!mesh.identity.bootstrapTokenValid && !mesh.identity.bootstrapToken" color="default" style="margin-bottom: 8px">
             no token yet
           </a-tag>
-          <br />
+          <div style="margin-top: 8px"></div>
           <a-button type="primary" size="small" @click="meshMintToken">Mint new token</a-button>
         </div>
       </template>
@@ -150,16 +150,16 @@
 >
   <a-form-model layout="vertical">
     <a-form-model-item label="Name (unique, for your reference)">
-      <a-input v-model="mesh.addForm.name" placeholder="e.g. de-fra-1" />
+      <a-input v-model="mesh.addForm.name" placeholder="e.g. de-fra-1"></a-input>
     </a-form-model-item>
     <a-form-model-item label="Public address (used in subscription links)">
-      <a-input v-model="mesh.addForm.address" placeholder="e.g. node1.example.com" />
+      <a-input v-model="mesh.addForm.address" placeholder="e.g. node1.example.com"></a-input>
     </a-form-model-item>
     <a-form-model-item label="API address (control plane host, often same as above)">
-      <a-input v-model="mesh.addForm.apiAddress" placeholder="leave empty to copy address" />
+      <a-input v-model="mesh.addForm.apiAddress" placeholder="leave empty to copy address"></a-input>
     </a-form-model-item>
     <a-form-model-item label="API port (gRPC)">
-      <a-input-number v-model="mesh.addForm.apiPort" :min="1" :max="65535" />
+      <a-input-number v-model="mesh.addForm.apiPort" :min="1" :max="65535"></a-input-number>
     </a-form-model-item>
   </a-form-model>
 </a-modal>
@@ -183,6 +183,6 @@
     v-model="mesh.pairToken"
     placeholder="XUIMESH1.xxxxxxxxxxxx.xxxxx..."
     style="font-family: monospace"
-  />
+  ></a-input>
 </a-modal>
 {{end}}
