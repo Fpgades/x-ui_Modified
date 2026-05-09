@@ -67,11 +67,21 @@ type Inbound struct {
 	Tag            string   `json:"tag" form:"tag" gorm:"unique"`
 	Sniffing       string   `json:"sniffing" form:"sniffing"`
 
-	// Mesh: which node runs this inbound. NodeId=1 is the synthetic
-	// "local" node — i.e. the panel host itself. Default is 1 so
-	// upstream-3x-ui DBs migrate seamlessly: ALTER TABLE ADD COLUMN with
-	// a default puts every existing inbound on the local node.
+	// Mesh: NodeId is the *primary* node — the one whose address is
+	// embedded in the canonical subscription URL. For multi-node
+	// deployments (one logical inbound running on N nodes) the full
+	// list lives in the inbound_nodes join table; NodeId is just the
+	// "first" / canonical entry. Default 1 keeps upstream-3x-ui DB
+	// migrations seamless.
 	NodeId int `json:"nodeId" form:"nodeId" gorm:"default:1;index"`
+
+	// NodeIds is a transient field bound from the HTTP request only —
+	// gorm:"-" keeps it out of the schema. The controllers parse it
+	// from form/JSON and call service.SetInboundNodeIDs to persist
+	// into the join table. Reading this field on a model loaded from
+	// DB returns nil; use service.GetInboundNodeIDs for the canonical
+	// list.
+	NodeIds []int `json:"nodeIds" form:"nodeIds" gorm:"-"`
 }
 
 // OutboundTraffics tracks traffic statistics for Xray outbound connections.
@@ -192,6 +202,16 @@ type Node struct {
 	XrayVersion  string `json:"xrayVersion"`
 	LastError    string `json:"lastError"`
 	AppliedHash  string `json:"appliedHash"` // sha256 of last successful ApplyConfig payload
+}
+
+// InboundNode is the join table that maps a single Inbound to N Nodes.
+// One row per (inbound, node) pair. The legacy Inbound.NodeId column
+// is retained as the "primary" location used for subscription URL
+// canonicalisation, but for config push-out the join table is the
+// source of truth: an inbound is deployed to *every* node listed here.
+type InboundNode struct {
+	InboundId int `json:"inboundId" gorm:"primaryKey;index;column:inbound_id"`
+	NodeId    int `json:"nodeId" gorm:"primaryKey;index;column:node_id"`
 }
 
 // NodeIdentity is a singleton (id=1 only) holding the keys/secrets a

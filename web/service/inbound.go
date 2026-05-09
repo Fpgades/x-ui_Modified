@@ -44,6 +44,12 @@ func (s *InboundService) GetInbounds(userId int) ([]*model.Inbound, error) {
 	}
 	// Enrich client stats with UUID/SubId from inbound settings
 	for _, inbound := range inbounds {
+		// Mesh: hydrate the transient NodeIds field from the join table
+		// so the frontend's edit form can show the existing selection.
+		if ids, err := GetInboundNodeIDs(inbound.Id); err == nil {
+			inbound.NodeIds = ids
+		}
+
 		clients, _ := s.GetClients(inbound)
 		if len(clients) == 0 || len(inbound.ClientStats) == 0 {
 			continue

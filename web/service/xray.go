@@ -128,7 +128,17 @@ func (s *XrayService) buildXrayConfig(nodeId int) (*xray.Config, error) {
 		if !inbound.Enable {
 			continue
 		}
-		if inbound.NodeId != nodeId {
+		// Mesh: an inbound may be deployed to multiple nodes (M:N via
+		// inbound_nodes). Include it in this node's config iff this
+		// node id is in the inbound's node list. Falls back to the
+		// legacy Inbound.NodeId match if the join lookup errors —
+		// keeps things working on a corrupt or pre-backfill DB.
+		if onNode, err := InboundIsOnNode(inbound.Id, nodeId); err != nil {
+			logger.Warningf("buildXrayConfig: InboundIsOnNode(%d,%d) failed: %v", inbound.Id, nodeId, err)
+			if inbound.NodeId != nodeId {
+				continue
+			}
+		} else if !onNode {
 			continue
 		}
 		// get settings clients

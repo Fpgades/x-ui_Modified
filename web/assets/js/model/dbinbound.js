@@ -21,14 +21,23 @@ class DBInbound {
         this.tag = "";
         this.sniffing = "";
         this.clientStats = ""
-        // Mesh: which node runs this inbound. Default 1 == synthetic
-        // local row, matches backend default. Standalone/master always
-        // have a row with id=1 so this never resolves to a missing FK.
+        // Mesh: which node(s) run this inbound. nodeId stays as the
+        // 'primary' (canonical sub URL) for legacy compat; nodeIds is
+        // the multi-select array. Default both to [1] / 1 == synthetic
+        // local row, matching the backend default. Standalone/master
+        // always have a row with id=1 so this never dangles.
         this.nodeId = 1;
+        this.nodeIds = [1];
         if (data == null) {
             return;
         }
         ObjectUtil.cloneProps(this, data);
+        // ObjectUtil.cloneProps may have left nodeIds undefined or as
+        // an empty array on inbounds saved before multi-node — fix
+        // those up so the form's v-model has something to bind to.
+        if (!Array.isArray(this.nodeIds) || this.nodeIds.length === 0) {
+            this.nodeIds = [this.nodeId || 1];
+        }
     }
 
     get totalGB() {

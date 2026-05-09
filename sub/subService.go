@@ -37,6 +37,12 @@ type SubService struct {
 	// cache lives just long enough to avoid repeating the DB lookup
 	// for inbounds that share the same node.
 	nodeAddrCache map[int]string
+
+	// currentNodeOverride is set transiently by the multi-node fan-out
+	// in GetSubs: for each (inbound, node) pair we want resolveInboundAddress
+	// to return THAT node's address, not the one stored on the inbound.
+	// Zero means "no override, use legacy logic".
+	currentNodeOverride int
 }
 
 // NewSubService creates a new subscription service with the given configuration.
@@ -83,17 +89,29 @@ func (s *SubService) GetSubs(subId string, host string) ([]string, int64, xray.C
 				inbound.StreamSettings = streamSettings
 			}
 		}
-		for _, client := range clients {
-			if client.Enable && client.SubID == subId {
-				link := s.getLink(inbound, client.Email)
-				result = append(result, link)
-				ct := s.getClientTraffics(inbound.ClientStats, client.Email)
-				clientTraffics = append(clientTraffics, ct)
-				if ct.LastOnline > lastOnline {
-					lastOnline = ct.LastOnline
+		// Mesh: an inbound may live on multiple nodes (M:N). Emit one
+		// link per node so the client can choose. Falls back to a
+		// single iteration with the inbound's primary NodeId when the
+		// join lookup fails or the inbound is on exactly one node.
+		nodeIds, err := service.GetInboundNodeIDs(inbound.Id)
+		if err != nil || len(nodeIds) == 0 {
+			nodeIds = []int{inbound.NodeId}
+		}
+		for _, nodeId := range nodeIds {
+			s.currentNodeOverride = nodeId
+			for _, client := range clients {
+				if client.Enable && client.SubID == subId {
+					link := s.getLink(inbound, client.Email)
+					result = append(result, link)
+					ct := s.getClientTraffics(inbound.ClientStats, client.Email)
+					clientTraffics = append(clientTraffics, ct)
+					if ct.LastOnline > lastOnline {
+						lastOnline = ct.LastOnline
+					}
 				}
 			}
 		}
+		s.currentNodeOverride = 0
 	}
 
 	// Prepare statistics
@@ -512,12 +530,15 @@ func (s *SubService) genHysteriaLink(inbound *model.Inbound, email string) strin
 }
 
 func (s *SubService) resolveInboundAddress(inbound *model.Inbound) string {
-	// Mesh: when an inbound is bound to a remote node, the subscription
-	// link must point clients at THAT node's public address — not at
-	// the master. NodeId=1 is the synthetic local row, treated like
-	// the standalone case (fall through to existing logic).
-	if inbound.NodeId > 1 {
-		if addr, ok := s.lookupNodeAddress(inbound.NodeId); ok && addr != "" {
+	// Multi-node fan-out: GetSubs sets currentNodeOverride before each
+	// link generation; that takes precedence over inbound.NodeId.
+	effectiveNodeId := inbound.NodeId
+	if s.currentNodeOverride > 0 {
+		effectiveNodeId = s.currentNodeOverride
+	}
+
+	if effectiveNodeId > 1 {
+		if addr, ok := s.lookupNodeAddress(effectiveNodeId); ok && addr != "" {
 			return addr
 		}
 		// Fall through if the node row vanished or has empty address —

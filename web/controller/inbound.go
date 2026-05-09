@@ -125,10 +125,18 @@ func (a *InboundController) addInbound(c *gin.Context) {
 		inbound.Tag = fmt.Sprintf("inbound-%v:%v", inbound.Listen, inbound.Port)
 	}
 
+	wantedNodes := normalizeNodeIDs(inbound.NodeIds, inbound.NodeId)
+
 	inbound, needRestart, err := a.inboundService.AddInbound(inbound)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
+	}
+	if err := service.SetInboundNodeIDs(nil, inbound.Id, wantedNodes); err != nil {
+		// Don't fail the create — the inbound is in the DB and the
+		// fallback Inbound.NodeId still works. Just log and surface
+		// in subsequent ops.
+		fmt.Printf("warn: SetInboundNodeIDs(%d, %v): %v\n", inbound.Id, wantedNodes, err)
 	}
 	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundCreateSuccess"), inbound, nil)
 	if needRestart {
@@ -137,6 +145,35 @@ func (a *InboundController) addInbound(c *gin.Context) {
 	// Broadcast inbounds update via WebSocket
 	inbounds, _ := a.inboundService.GetInbounds(user.Id)
 	websocket.BroadcastInbounds(inbounds)
+}
+
+// normalizeNodeIDs builds the final node-id list for an inbound's
+// multi-node assignment. Falls back to the legacy single NodeId field
+// when the explicit list is empty (clients that haven't been updated
+// yet still get sane behaviour). De-duplicates.
+func normalizeNodeIDs(list []int, fallback int) []int {
+	if len(list) == 0 {
+		if fallback <= 0 {
+			fallback = 1
+		}
+		return []int{fallback}
+	}
+	seen := make(map[int]struct{}, len(list))
+	out := make([]int, 0, len(list))
+	for _, id := range list {
+		if id <= 0 {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return []int{1}
+	}
+	return out
 }
 
 // delInbound deletes an inbound configuration by its ID.
@@ -176,10 +213,15 @@ func (a *InboundController) updateInbound(c *gin.Context) {
 		jsonMsg(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), err)
 		return
 	}
+	wantedNodes := normalizeNodeIDs(inbound.NodeIds, inbound.NodeId)
+
 	inbound, needRestart, err := a.inboundService.UpdateInbound(inbound)
 	if err != nil {
 		jsonMsg(c, I18nWeb(c, "somethingWentWrong"), err)
 		return
+	}
+	if err := service.SetInboundNodeIDs(nil, inbound.Id, wantedNodes); err != nil {
+		fmt.Printf("warn: SetInboundNodeIDs(%d, %v): %v\n", inbound.Id, wantedNodes, err)
 	}
 	jsonMsgObj(c, I18nWeb(c, "pages.inbounds.toasts.inboundUpdateSuccess"), inbound, nil)
 	if needRestart {

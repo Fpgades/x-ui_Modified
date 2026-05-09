@@ -8,12 +8,19 @@
         <a-input v-model.trim="dbInbound.remark"></a-input>
     </a-form-item>
 
-    <!-- Mesh: which node runs this inbound. Hidden when there is only
-         the synthetic local row (standalone, or master with no nodes
-         paired yet). meshNodeOptions is populated by the inbounds
-         page's Vue mounted() hook. -->
-    <a-form-item label="Node" v-if="meshNodeOptions && meshNodeOptions.length > 1">
-        <a-select v-model="dbInbound.nodeId" :dropdown-class-name="themeSwitcher.currentTheme">
+    <!-- Mesh: nodes this inbound is deployed to. Hidden when only
+         the synthetic local row exists. Multi-select — one inbound
+         can fan out across N nodes with the same UUIDs/clients, and
+         the subscription URL will list one link per chosen node.
+         dbInbound.nodeIds is an array of node ids; the first entry
+         is also used as the canonical primary (inbound.nodeId on the
+         backend). -->
+    <a-form-item label="Nodes" v-if="meshNodeOptions && meshNodeOptions.length > 1">
+        <a-select
+            mode="multiple"
+            v-model="dbInbound.nodeIds"
+            :dropdown-class-name="themeSwitcher.currentTheme"
+            placeholder="Choose one or more nodes (defaults to Master)">
             <a-select-option v-for="n in meshNodeOptions" :key="n.id" :value="n.id">
                 [[ n.label ]]
             </a-select-option>

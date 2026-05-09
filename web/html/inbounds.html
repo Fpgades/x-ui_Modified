@@ -1421,7 +1421,8 @@
           expiryTime: dbInbound.expiryTime,
           trafficReset: dbInbound.trafficReset,
           lastTrafficResetTime: dbInbound.lastTrafficResetTime,
-          nodeId: dbInbound.nodeId || 1,
+          nodeId: (dbInbound.nodeIds && dbInbound.nodeIds[0]) || dbInbound.nodeId || 1,
+          nodeIds: (dbInbound.nodeIds && dbInbound.nodeIds.length) ? dbInbound.nodeIds : [dbInbound.nodeId || 1],
 
           listen: '',
           port: RandomUtil.randomInteger(10000, 60000),
@@ -1468,7 +1469,8 @@
           expiryTime: dbInbound.expiryTime,
           trafficReset: dbInbound.trafficReset,
           lastTrafficResetTime: dbInbound.lastTrafficResetTime,
-          nodeId: dbInbound.nodeId || 1,
+          nodeId: (dbInbound.nodeIds && dbInbound.nodeIds[0]) || dbInbound.nodeId || 1,
+          nodeIds: (dbInbound.nodeIds && dbInbound.nodeIds.length) ? dbInbound.nodeIds : [dbInbound.nodeId || 1],
 
           listen: inbound.listen,
           port: inbound.port,
@@ -1494,7 +1496,8 @@
           expiryTime: dbInbound.expiryTime,
           trafficReset: dbInbound.trafficReset,
           lastTrafficResetTime: dbInbound.lastTrafficResetTime,
-          nodeId: dbInbound.nodeId || 1,
+          nodeId: (dbInbound.nodeIds && dbInbound.nodeIds[0]) || dbInbound.nodeId || 1,
+          nodeIds: (dbInbound.nodeIds && dbInbound.nodeIds.length) ? dbInbound.nodeIds : [dbInbound.nodeId || 1],
 
           listen: inbound.listen,
           port: inbound.port,
@@ -1509,7 +1512,16 @@
         data.sniffing = inbound.sniffing.toString();
 
         const formData = new FormData();
-        Object.keys(data).forEach(key => formData.append(key, data[key]));
+        Object.keys(data).forEach(key => {
+          const v = data[key];
+          // Arrays (e.g. nodeIds) need one append per element so Gin
+          // form-binds them as []int rather than as a single CSV string.
+          if (Array.isArray(v)) {
+            v.forEach(item => formData.append(key, item));
+          } else {
+            formData.append(key, v);
+          }
+        });
 
         await this.submit(`/panel/api/inbounds/update/${dbInbound.id}`, formData, inModal);
       },

@@ -44,10 +44,43 @@ func initModels() error {
 		// the synthetic id=1 row.
 		&model.Node{},
 		&model.NodeIdentity{},
+		&model.InboundNode{},
 	}
 	for _, model := range models {
 		if err := db.AutoMigrate(model); err != nil {
 			log.Printf("Error auto migrating model: %v", err)
+			return err
+		}
+	}
+	return nil
+}
+
+// ensureInboundNodeBackfill copies legacy Inbound.NodeId values into
+// the new inbound_nodes join table. Runs every boot, idempotent: only
+// inserts a row if one doesn't already exist for the (inbound, node)
+// pair. After the join table is populated, Inbound.NodeId remains as
+// the "primary" location used for canonical sub URLs but the join is
+// what the config-builder filters on.
+func ensureInboundNodeBackfill() error {
+	var inbounds []model.Inbound
+	if err := db.Find(&inbounds).Error; err != nil {
+		return err
+	}
+	for _, ib := range inbounds {
+		nodeId := ib.NodeId
+		if nodeId == 0 {
+			nodeId = 1
+		}
+		var count int64
+		if err := db.Model(&model.InboundNode{}).
+			Where("inbound_id = ? AND node_id = ?", ib.Id, nodeId).
+			Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		if err := db.Create(&model.InboundNode{InboundId: ib.Id, NodeId: nodeId}).Error; err != nil {
 			return err
 		}
 	}
@@ -175,6 +208,10 @@ func InitDB(dbPath string) error {
 	}
 
 	if err := ensureLocalNode(); err != nil {
+		return err
+	}
+
+	if err := ensureInboundNodeBackfill(); err != nil {
 		return err
 	}
 
