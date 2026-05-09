@@ -106,4 +106,3 @@ func VerifyToken(stored, presented string) bool {
 func IsExpired(expiryUnixMs int64) bool {
 	return expiryUnixMs > 0 && time.Now().UnixMilli() > expiryUnixMs
 }
-

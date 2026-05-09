@@ -197,11 +197,11 @@ type Node struct {
 	ClientKeyPem  string `json:"-"`
 
 	// Last-seen telemetry, updated by heartbeat.
-	LastSeen     int64  `json:"lastSeen" gorm:"default:0"`
-	Version      string `json:"version"`
-	XrayVersion  string `json:"xrayVersion"`
-	LastError    string `json:"lastError"`
-	AppliedHash  string `json:"appliedHash"` // sha256 of last successful ApplyConfig payload
+	LastSeen    int64  `json:"lastSeen" gorm:"default:0"`
+	Version     string `json:"version"`
+	XrayVersion string `json:"xrayVersion"`
+	LastError   string `json:"lastError"`
+	AppliedHash string `json:"appliedHash"` // sha256 of last successful ApplyConfig payload
 }
 
 // InboundNode is the join table that maps a single Inbound to N Nodes.

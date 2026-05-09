@@ -145,9 +145,9 @@ func (a *MeshController) listNodes(c *gin.Context) {
 
 type createNodeRequest struct {
 	Name       string `json:"name" form:"name"`
-	Address    string `json:"address" form:"address"`         // public, used in subscription
-	Port       int    `json:"port" form:"port"`               // optional, for sub-link generation
-	ApiAddress string `json:"apiAddress" form:"apiAddress"`   // master->node control plane
+	Address    string `json:"address" form:"address"`       // public, used in subscription
+	Port       int    `json:"port" form:"port"`             // optional, for sub-link generation
+	ApiAddress string `json:"apiAddress" form:"apiAddress"` // master->node control plane
 	ApiPort    int    `json:"apiPort" form:"apiPort"`
 }
 

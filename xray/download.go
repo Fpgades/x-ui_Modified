@@ -163,9 +163,9 @@ func unzipXrayBundle(src, destDir string) (int, error) {
 	defer r.Close()
 
 	wanted := map[string]bool{
-		"xray":         true,
-		"geosite.dat":  true,
-		"geoip.dat":    true,
+		"xray":        true,
+		"geosite.dat": true,
+		"geoip.dat":   true,
 	}
 	count := 0
 	for _, f := range r.File {
