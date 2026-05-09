@@ -89,9 +89,12 @@ func Dial(ctx context.Context, n *model.Node) (*Client, error) {
 	}
 
 	addr := fmt.Sprintf("%s:%d", n.ApiAddress, n.ApiPort)
-	conn, err := grpc.DialContext(ctx, addr,
+	// grpc.NewClient is the v1.65+ replacement for the deprecated
+	// DialContext+WithBlock pattern: connection is lazy, the first RPC
+	// either succeeds or returns Unavailable immediately. Suits our
+	// flow because every call already has its own ctx with timeout.
+	conn, err := grpc.NewClient(addr,
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
-		grpc.WithBlock(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
@@ -185,9 +188,8 @@ func Pair(
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	conn, err := grpc.DialContext(dialCtx, addr,
+	conn, err := grpc.NewClient(addr,
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)),
-		grpc.WithBlock(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("pair dial %s: %w", addr, err)
