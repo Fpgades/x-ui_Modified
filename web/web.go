@@ -308,12 +308,22 @@ func (s *Server) initRouter() (*gin.Engine, error) {
 // jobs) which the panel relies on for periodic maintenance and monitoring.
 func (s *Server) startTask() {
 	s.customGeoService.EnsureOnStartup()
-	err := s.xrayService.RestartXray(true)
-	if err != nil {
-		logger.Warning("start xray failed:", err)
+
+	// In node mode the xray config is owned by the master — booting
+	// xray from the local DB would write a template-only config and
+	// fight with the master's pushes. Skip both the initial RestartXray
+	// and the CheckXrayRunningJob watchdog; the master's PushAll will
+	// drive xray as soon as it has something to push.
+	if s.settingService.GetPanelMode() != service.PanelModeNode {
+		err := s.xrayService.RestartXray(true)
+		if err != nil {
+			logger.Warning("start xray failed:", err)
+		}
+		// Check whether xray is running every second
+		s.cron.AddJob("@every 1s", job.NewCheckXrayRunningJob())
+	} else {
+		logger.Info("mesh: node mode — skipping local xray start and CheckXrayRunningJob; master will drive xray via ApplyConfig")
 	}
-	// Check whether xray is running every second
-	s.cron.AddJob("@every 1s", job.NewCheckXrayRunningJob())
 
 	// Check if xray needs to be restarted every 30 seconds.
 	// In master mode, also propagate the change to remote nodes via
