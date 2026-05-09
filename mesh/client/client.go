@@ -60,11 +60,32 @@ func Dial(ctx context.Context, n *model.Node) (*Client, error) {
 		return nil, errors.New("failed to load node CA into pool")
 	}
 
+	// We pin the node CA exactly — it belongs to one node and only
+	// signs that node's server cert. SAN verification against the
+	// configured ApiAddress (often a raw IP that wasn't in the cert's
+	// SAN at generation time) would reject perfectly valid certs, so
+	// we disable Go's default verifier and run our own that just walks
+	// the chain to the pinned CA.
 	tlsCfg := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      pool,
-		ServerName:   n.ApiAddress,
-		MinVersion:   tls.VersionTLS13,
+		Certificates:       []tls.Certificate{cert},
+		InsecureSkipVerify: true, //nolint:gosec — replaced by VerifyConnection
+		MinVersion:         tls.VersionTLS13,
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) == 0 {
+				return errors.New("node presented no certificate")
+			}
+			leaf := cs.PeerCertificates[0]
+			intermediates := x509.NewCertPool()
+			for _, c := range cs.PeerCertificates[1:] {
+				intermediates.AddCert(c)
+			}
+			_, err := leaf.Verify(x509.VerifyOptions{
+				Roots:         pool,
+				Intermediates: intermediates,
+				KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+			})
+			return err
+		},
 	}
 
 	addr := fmt.Sprintf("%s:%d", n.ApiAddress, n.ApiPort)
