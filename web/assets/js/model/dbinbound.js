@@ -21,6 +21,10 @@ class DBInbound {
         this.tag = "";
         this.sniffing = "";
         this.clientStats = ""
+        // Mesh: which node runs this inbound. Default 1 == synthetic
+        // local row, matches backend default. Standalone/master always
+        // have a row with id=1 so this never resolves to a missing FK.
+        this.nodeId = 1;
         if (data == null) {
             return;
         }

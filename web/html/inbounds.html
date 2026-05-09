@@ -1113,6 +1113,9 @@
       isRefreshEnabled: localStorage.getItem("isRefreshEnabled") === "true" ? true : false,
       refreshing: false,
       refreshInterval: Number(localStorage.getItem("refreshInterval")) || 5000,
+      // Mesh: list of {id, label} for the inbound form's "Node" dropdown.
+      // Loaded from /panel/api/mesh/nodes on mount when in master mode.
+      meshNodeOptions: [],
       subSettings: {
         enable: false,
         subTitle: '',
@@ -1130,6 +1133,20 @@
     methods: {
       loading(spinning = true) {
         this.loadingStates.spinning = spinning;
+      },
+      async loadMeshNodes() {
+        try {
+          const r = await HttpUtil.get('/panel/api/mesh/nodes');
+          if (!r || !r.success || !Array.isArray(r.obj)) return;
+          this.meshNodeOptions = r.obj.map(n => ({
+            id: n.id,
+            label: n.isLocal
+              ? 'Master (local)'
+              : (n.name + (n.address ? ' — ' + n.address : '') + ' [' + (n.status || '?') + ']')
+          }));
+        } catch (e) {
+          // mesh API may not be reachable in some configs — silently skip.
+        }
       },
       async getDBInbounds() {
         this.refreshing = true;
@@ -2029,11 +2046,16 @@
       }
       this.loading();
       this.getDefaultSettings();
-      
+
       // Initial data fetch
       this.getDBInbounds().then(() => {
         this.loading(false);
       });
+
+      // Mesh: populate the Node dropdown for the inbound form.
+      // Best-effort — failures (e.g. unauthorized, mesh disabled) just
+      // leave the dropdown hidden via its v-if guard.
+      this.loadMeshNodes();
 
       // Setup WebSocket for real-time updates
       if (window.wsClient) {

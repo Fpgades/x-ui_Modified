@@ -8,6 +8,18 @@
         <a-input v-model.trim="dbInbound.remark"></a-input>
     </a-form-item>
 
+    <!-- Mesh: which node runs this inbound. Hidden when there is only
+         the synthetic local row (standalone, or master with no nodes
+         paired yet). meshNodeOptions is populated by the inbounds
+         page's Vue mounted() hook. -->
+    <a-form-item label="Node" v-if="meshNodeOptions && meshNodeOptions.length > 1">
+        <a-select v-model="dbInbound.nodeId" :dropdown-class-name="themeSwitcher.currentTheme">
+            <a-select-option v-for="n in meshNodeOptions" :key="n.id" :value="n.id">
+                [[ n.label ]]
+            </a-select-option>
+        </a-select>
+    </a-form-item>
+
     <a-form-item label='{{ i18n "protocol" }}'>
         <a-select v-model="inbound.protocol" :disabled="isEdit" :dropdown-class-name="themeSwitcher.currentTheme">
             <a-select-option v-for="p in Protocols" :key="p" :value="p">[[ p

@@ -30,6 +30,13 @@ type SubService struct {
 	datepicker     string
 	inboundService service.InboundService
 	settingService service.SettingService
+
+	// Mesh: cache of node_id -> public address, populated on first
+	// resolveInboundAddress hit per request lifecycle. SubService is
+	// created per request (NewSubService in subController), so the
+	// cache lives just long enough to avoid repeating the DB lookup
+	// for inbounds that share the same node.
+	nodeAddrCache map[int]string
 }
 
 // NewSubService creates a new subscription service with the given configuration.
@@ -505,10 +512,41 @@ func (s *SubService) genHysteriaLink(inbound *model.Inbound, email string) strin
 }
 
 func (s *SubService) resolveInboundAddress(inbound *model.Inbound) string {
+	// Mesh: when an inbound is bound to a remote node, the subscription
+	// link must point clients at THAT node's public address — not at
+	// the master. NodeId=1 is the synthetic local row, treated like
+	// the standalone case (fall through to existing logic).
+	if inbound.NodeId > 1 {
+		if addr, ok := s.lookupNodeAddress(inbound.NodeId); ok && addr != "" {
+			return addr
+		}
+		// Fall through if the node row vanished or has empty address —
+		// at least the link will work locally rather than be broken.
+	}
 	if inbound.Listen == "" || inbound.Listen == "0.0.0.0" || inbound.Listen == "::" || inbound.Listen == "::0" {
 		return s.address
 	}
 	return inbound.Listen
+}
+
+// lookupNodeAddress returns the Node row's public address for use in
+// subscription URLs. Cached map populated lazily on first miss to
+// avoid one DB hit per inbound on every subscription render.
+func (s *SubService) lookupNodeAddress(nodeId int) (string, bool) {
+	if s.nodeAddrCache == nil {
+		s.nodeAddrCache = map[int]string{}
+	}
+	if addr, ok := s.nodeAddrCache[nodeId]; ok {
+		return addr, ok
+	}
+	db := database.GetDB()
+	var n model.Node
+	if err := db.Select("address").First(&n, nodeId).Error; err != nil {
+		s.nodeAddrCache[nodeId] = ""
+		return "", false
+	}
+	s.nodeAddrCache[nodeId] = n.Address
+	return n.Address, true
 }
 
 func findClientIndex(clients []model.Client, email string) int {
